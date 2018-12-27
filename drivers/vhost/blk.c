@@ -23,7 +23,7 @@
 #include "vhost.h"
 #include "blk.h"
 
-static DEFINE_IDA(vhost_blk_index_ida);
+DEFINE_IDA(vhost_blk_index_ida);
 
 enum {
 	VHOST_BLK_VQ_REQ = 0,
@@ -83,7 +83,7 @@ struct vhost_blk {
 	int index;
 };
 
-static int move_iovec(struct iovec *from, struct iovec *to,
+int move_iovec(struct iovec *from, struct iovec *to,
 		      size_t len, int iov_count)
 {
 	int seg = 0;
@@ -107,13 +107,13 @@ static int move_iovec(struct iovec *from, struct iovec *to,
 	return seg;
 }
 
-static inline int iov_num_pages(struct iovec *iov)
+inline int iov_num_pages(struct iovec *iov)
 {
 	return (PAGE_ALIGN((unsigned long)iov->iov_base + iov->iov_len) -
 	       ((unsigned long)iov->iov_base & PAGE_MASK)) >> PAGE_SHIFT;
 }
 
-static inline int vhost_blk_set_status(struct vhost_blk_req *req, u8 status)
+inline int vhost_blk_set_status(struct vhost_blk_req *req, u8 status)
 {
 	struct vhost_blk *blk = req->blk;
 	struct iov_iter iov_iter;
@@ -128,7 +128,7 @@ static inline int vhost_blk_set_status(struct vhost_blk_req *req, u8 status)
 	return 0;
 }
 
-static void vhost_blk_req_done(struct bio *bio)
+void vhost_blk_req_done(struct bio *bio)
 {
 	struct vhost_blk_req *req = bio->bi_private;
 	struct vhost_blk *blk = req->blk;
@@ -141,7 +141,7 @@ static void vhost_blk_req_done(struct bio *bio)
 	bio_put(bio);
 }
 
-static void vhost_blk_req_unmap(struct vhost_blk_req *req)
+void vhost_blk_req_unmap(struct vhost_blk_req *req)
 {
 	struct req_page_list *pl;
 	int i, j;
@@ -161,7 +161,7 @@ static void vhost_blk_req_unmap(struct vhost_blk_req *req)
 		kfree(req->pl);
 }
 
-static int vhost_blk_bio_make(struct vhost_blk_req *req,
+int vhost_blk_bio_make(struct vhost_blk_req *req,
 			      struct block_device *bdev)
 {
 	int pages_nr_total, i, j, ret;
@@ -176,6 +176,7 @@ static int vhost_blk_bio_make(struct vhost_blk_req *req,
 	for (i = 0; i < iov_nr; i++)
 		pages_nr_total += iov_num_pages(&iov[i]);
 
+	//trace_printk("1 req->op_flags=%d req->op=%d\n",req->op_flags, req->op);
 	if (unlikely(req->op_flags == REQ_PREFLUSH)) {
 		req->use_inline = true;
 		req->pl = NULL;
@@ -190,10 +191,12 @@ static int vhost_blk_bio_make(struct vhost_blk_req *req,
 		bio->bi_end_io  = vhost_blk_req_done;
 		bio_set_op_attrs(bio, req->op, req->op_flags);
 		req->bio[bio_nr++] = bio;
+		//trace_printk("REQ_PREFLUSH !!!!!\n");
 
 		goto out;
 	}
 
+	//trace_printk("4 pages_nr_total=%d NR_INLINE=%d\n",pages_nr_total, NR_INLINE);
 	if (pages_nr_total > NR_INLINE) {
 		int pl_len, page_len, bio_len;
 
@@ -217,6 +220,7 @@ static int vhost_blk_bio_make(struct vhost_blk_req *req,
 	}
 
 	for (req->iov_nr = i = 0; i < iov_nr; i++) {
+
 		int pages_nr = iov_num_pages(&iov[i]);
 		unsigned long iov_base, iov_len;
 		struct req_page_list *pl;
@@ -225,13 +229,13 @@ static int vhost_blk_bio_make(struct vhost_blk_req *req,
 		iov_base = (unsigned long)iov[i].iov_base;
 		iov_len  = (unsigned long)iov[i].iov_len;
 
+		//trace_printk("5 i=%d pages_nr=%d iov_base=%ld iov_len=%ld\n",i,pages_nr,iov_base,iov_len);
 		/* TODO: Limit the total number of pages pinned */
 		ret = get_user_pages_fast(iov_base, pages_nr,
 					  !req->op, pages);
 		/* No pages were pinned */
 		if (ret < 0)
 			goto fail;
-
 		req->iov_nr++;
 		pl = &req->pl[i];
 		pl->pages_nr = ret;
@@ -253,6 +257,7 @@ bio_alloc:
 			if (len > iov_len)
 				len = iov_len;
 
+			//trace_printk("8 page = %d\n",j );
 			while (!bio || bio_add_page(bio, page, len, off) <= 0) {
 				bio = bio_alloc(GFP_KERNEL, pages_nr);
 				if (!bio)
@@ -263,6 +268,7 @@ bio_alloc:
 				bio->bi_end_io  = vhost_blk_req_done;
 				req->bio[bio_nr++] = bio;
 				bio_set_op_attrs(bio, req->op, req->op_flags);
+				//trace_printk("9 save bio to req->bio req->op=%d req->op_flags=%d\n",req->op,req->op_flags);
 			}
 			req->sector	+= len >> 9;
 			iov_base	+= len;
@@ -289,7 +295,7 @@ fail:
 	return -ENOMEM;
 }
 
-static inline void vhost_blk_bio_send(struct vhost_blk_req *req)
+inline void vhost_blk_bio_send(struct vhost_blk_req *req)
 {
 	struct blk_plug plug;
 	int i, bio_nr;
@@ -301,7 +307,7 @@ static inline void vhost_blk_bio_send(struct vhost_blk_req *req)
 	blk_finish_plug(&plug);
 }
 
-static int vhost_blk_req_submit(struct vhost_blk_req *req, struct file *file)
+int vhost_blk_req_submit(struct vhost_blk_req *req, struct file *file)
 {
 
 	struct inode *inode = file->f_mapping->host;
@@ -314,6 +320,7 @@ static int vhost_blk_req_submit(struct vhost_blk_req *req, struct file *file)
 
 	vhost_blk_bio_send(req);
 
+	// why get this lock?
 	spin_lock(&req->blk->flush_lock);
 	req->during_flush = req->blk->during_flush;
 	atomic_inc(&req->blk->req_inflight[req->during_flush]);
@@ -322,7 +329,7 @@ static int vhost_blk_req_submit(struct vhost_blk_req *req, struct file *file)
 	return ret;
 }
 
-static int vhost_blk_req_handle(struct vhost_virtqueue *vq,
+int vhost_blk_req_handle(struct vhost_virtqueue *vq,
 				struct virtio_blk_outhdr *hdr,
 				u16 head, u16 out, u16 in,
 				struct file *file)
@@ -339,28 +346,37 @@ static int vhost_blk_req_handle(struct vhost_virtqueue *vq,
 	req->blk	= blk;
 	req->sector	= hdr->sector;
 	req->iov	= blk->iov;
+	req->op_flags   = 0;
 
 	req->len	= iov_length(vq->iov, out + in) - sizeof(status);
-	req->iov_nr	= move_iovec(vq->iov, req->iov, req->len, out + in);
-
-	//iov_iter_init(&iov_iter, READ, req->iov, 1, len);
-	//ret = copy_to_iter(id, len, &iov_iter);
+	req->iov_nr    = move_iovec(vq->iov, req->iov, req->len, out + in);
+	//trace_printk("req->len = %d req->iov_nr = %d\n", req->len,req->iov_nr);
 
 	move_iovec(vq->iov, req->status, sizeof(status), out + in);
+	//iov_iter_init(&iov_iter, WRITE, vq->iov, out + in, req->len);
+	//iov_iter_advance(&iov_iter, sizeof(*hdr));
 
+	//req->len	-= sizeof(*hdr);
+	//if (req->len != iov_length(, )) {
+	//	trace_printk("!!!!!! may have error req->len=%d iov_length(&iov_iter)=%d \n", req->len, iov_length(&iov_iter));
+	//}
+	//req->iov_nr	= out + in -2; // 1 hdr 1 status
+
+	//trace_printk("hdr->type=%d\n VIRTIO_BLK_T_OUT=%d VIRTIO_BLK_T_IN=%d \n VIRTIO_BLK_T_FLUSH=%d VIRTIO_BLK_T_GET_ID=%d \n", hdr->type,VIRTIO_BLK_T_OUT,VIRTIO_BLK_T_IN,VIRTIO_BLK_T_FLUSH,VIRTIO_BLK_T_GET_ID);
 	switch (hdr->type) {
 	case VIRTIO_BLK_T_OUT:
 		req->op = REQ_OP_WRITE;
-		ret = vhost_blk_req_submit(req, file);
+		req->op_flags = REQ_SYNC | REQ_IDLE;
+		ret = vhost_blk_req_submit(req,file);
 		break;
 	case VIRTIO_BLK_T_IN:
 		req->op = REQ_OP_READ;
-		ret = vhost_blk_req_submit(req, file);
+		ret = vhost_blk_req_submit(req,file);
 		break;
 	case VIRTIO_BLK_T_FLUSH:
 		req->op = REQ_OP_WRITE;
 		req->op_flags = REQ_PREFLUSH;
-		ret = vhost_blk_req_submit(req, file);
+		ret = vhost_blk_req_submit(req,file);
 		break;
 	case VIRTIO_BLK_T_GET_ID:
 		ret = snprintf(id, VIRTIO_BLK_ID_BYTES,
@@ -390,7 +406,7 @@ static int vhost_blk_req_handle(struct vhost_virtqueue *vq,
 }
 
 /* Guest kick us for I/O submit */
-static void vhost_blk_handle_guest_kick(struct vhost_work *work)
+void vhost_blk_handle_guest_kick(struct vhost_work *work)
 {
 	struct virtio_blk_outhdr hdr;
 	struct vhost_virtqueue *vq;
@@ -399,20 +415,25 @@ static void vhost_blk_handle_guest_kick(struct vhost_work *work)
 	int in, out, ret;
 	struct file *f;
 	u16 head;
+	struct iov_iter from;
 
 	vq = container_of(work, struct vhost_virtqueue, poll.work);
 	blk = container_of(vq->dev, struct vhost_blk, dev);
 
+	//trace_printk("vhost_blk_handle_guest_kick enter \n");
 	/* TODO: check that we are running from vhost_worker? */
+	/************ fixme later *****************/
 	f = rcu_dereference_check(vq->private_data, 1);
 	if (!f)
 		return;
 
 	vhost_disable_notify(&blk->dev, vq);
 	for (;;) {
+		//trace_printk("CCH: before vhost_get_vq_desc \n");
 		head = vhost_get_vq_desc(vq, vq->iov,
 					 ARRAY_SIZE(vq->iov),
 					 &out, &in, NULL, NULL);
+		//trace_printk("CCH: after vhost_get_vq_desc head=%d \n",head);
 		if (unlikely(head < 0))
 			break;
 
@@ -423,14 +444,21 @@ static void vhost_blk_handle_guest_kick(struct vhost_work *work)
 			}
 			break;
 		}
-		//move_iovec(vq->iov, &hdr_iov, sizeof(hdr), out);
+		//trace_printk("CCH: before copy_from_user  \n");
+		// move_iovec can change vq->iov address. skip hdr.
+		ret = move_iovec(vq->iov, &hdr_iov, sizeof(hdr), out); // out better change to 1.
 		//ret = memcpy_fromiovecend((unsigned char *)&hdr, &hdr_iov, 0,
 		//			   sizeof(hdr));
-		if (copy_from_user(&hdr, vq->iov[0].iov_base, sizeof(hdr)) != sizeof(hdr)) {
+			   
+		// get hdr from iov, ret should be 1;
+		iov_iter_init(&from, WRITE, &hdr_iov, ret, sizeof(hdr));
+
+		if (copy_from_iter(&hdr, sizeof(hdr), &from) != sizeof(hdr)) {
 			vq_err(vq, "Failed to get block header!\n");
 			vhost_discard_vq_desc(vq, 1);
 			break;
 		}
+		//trace_printk("WRITE#############head=%d hdr->type=%d her->secotr=%ld hdr->proir=%d\n", head, hdr.type, hdr.sector, hdr.ioprio);
 
 		if (vhost_blk_req_handle(vq, &hdr, head, out, in, f) < 0)
 			break;
@@ -443,7 +471,7 @@ static void vhost_blk_handle_guest_kick(struct vhost_work *work)
 }
 
 /* Host kick us for I/O completion */
-static void vhost_blk_handle_host_kick(struct vhost_work *work)
+void vhost_blk_handle_host_kick(struct vhost_work *work)
 {
 
 	struct vhost_virtqueue *vq;
@@ -453,7 +481,7 @@ static void vhost_blk_handle_host_kick(struct vhost_work *work)
 	bool added, zero;
 	u8 status;
 	int ret;
-
+	//trace_printk("vhost_blk_handle_host_kick  \n");
 	blk = container_of(work, struct vhost_blk, work);
 	vq = &blk->vqs[VHOST_BLK_VQ_REQ].vq;
 
@@ -484,7 +512,7 @@ static void vhost_blk_handle_host_kick(struct vhost_work *work)
 		vhost_signal(&blk->dev, &blk->vqs[VHOST_BLK_VQ_REQ].vq);
 }
 
-static void vhost_blk_flush(struct vhost_blk *blk)
+void vhost_blk_flush(struct vhost_blk *blk)
 {
 	spin_lock(&blk->flush_lock);
 	blk->during_flush = 1;
@@ -504,7 +532,7 @@ static void vhost_blk_flush(struct vhost_blk *blk)
 	spin_unlock(&blk->flush_lock);
 }
 
-static inline void vhost_blk_stop(struct vhost_blk *blk, struct file **file)
+void vhost_blk_stop(struct vhost_blk *blk, struct file **file)
 {
 	struct vhost_virtqueue *vq = &blk->vqs[VHOST_BLK_VQ_REQ].vq;
 	struct file *f;
@@ -518,7 +546,7 @@ static inline void vhost_blk_stop(struct vhost_blk *blk, struct file **file)
 	*file = f;
 }
 
-static int vhost_blk_open(struct inode *inode, struct file *file)
+int vhost_blk_open(struct inode *inode, struct file *file)
 {
 	struct vhost_blk *blk;
 	struct vhost_virtqueue **vqs;
@@ -553,6 +581,7 @@ static int vhost_blk_open(struct inode *inode, struct file *file)
 	file->private_data = blk;
 
 	vhost_work_init(&blk->work, vhost_blk_handle_host_kick);
+	//trace_printk("after vhost_work_init \n");
 
 	return ret;
 out_dev:
@@ -561,7 +590,7 @@ out:
 	return ret;
 }
 
-static int vhost_blk_release(struct inode *inode, struct file *f)
+int vhost_blk_release(struct inode *inode, struct file *f)
 {
 	struct vhost_blk *blk = f->private_data;
 	struct file *file;
@@ -579,7 +608,7 @@ static int vhost_blk_release(struct inode *inode, struct file *f)
 	return 0;
 }
 
-static int vhost_blk_set_features(struct vhost_blk *blk, u64 features)
+int vhost_blk_set_features(struct vhost_blk *blk, u64 features)
 {
 	struct vhost_virtqueue *vq;
 	int i;
@@ -595,7 +624,7 @@ static int vhost_blk_set_features(struct vhost_blk *blk, u64 features)
 	return 0;
 }
 
-static long vhost_blk_set_backend(struct vhost_blk *blk, unsigned index, int fd)
+long vhost_blk_set_backend(struct vhost_blk *blk, unsigned index, int fd)
 {
 	struct vhost_virtqueue *vq = &blk->vqs[VHOST_BLK_VQ_REQ].vq;
 	struct file *file, *oldfile;
@@ -632,6 +661,7 @@ static long vhost_blk_set_backend(struct vhost_blk *blk, unsigned index, int fd)
 		goto out_file;
 	}
 
+	
 	oldfile = rcu_dereference_protected(vq->private_data,
 			lockdep_is_held(&vq->mutex));
 	if (file != oldfile) {
@@ -641,7 +671,7 @@ static long vhost_blk_set_backend(struct vhost_blk *blk, unsigned index, int fd)
 		if (ret)
 			goto out_file;
 	}
-
+	
 	mutex_unlock(&vq->mutex);
 
 	if (oldfile) {
@@ -661,7 +691,7 @@ out_dev:
 	return ret;
 }
 
-static long vhost_blk_reset_owner(struct vhost_blk *blk)
+long vhost_blk_reset_owner(struct vhost_blk *blk)
 {
 	struct vhost_umem *memory;
 	struct file *file = NULL;
@@ -686,7 +716,7 @@ done:
 	return err;
 }
 
-static int vhost_blk_setup(struct vhost_blk *blk)
+int vhost_blk_setup(struct vhost_blk *blk)
 {
 	blk->reqs_nr = blk->vqs[VHOST_BLK_VQ_REQ].vq.num;
 
@@ -698,7 +728,7 @@ static int vhost_blk_setup(struct vhost_blk *blk)
 	return 0;
 }
 
-static long vhost_blk_ioctl(struct file *f, unsigned int ioctl,
+long vhost_blk_ioctl(struct file *f, unsigned int ioctl,
 			    unsigned long arg)
 {
 	struct vhost_blk *blk = f->private_data;
@@ -741,7 +771,7 @@ static long vhost_blk_ioctl(struct file *f, unsigned int ioctl,
 	}
 }
 
-static const struct file_operations vhost_blk_fops = {
+const struct file_operations vhost_blk_fops = {
 	.owner          = THIS_MODULE,
 	.open           = vhost_blk_open,
 	.release        = vhost_blk_release,
@@ -749,18 +779,18 @@ static const struct file_operations vhost_blk_fops = {
 	.unlocked_ioctl = vhost_blk_ioctl,
 };
 
-static struct miscdevice vhost_blk_misc = {
+struct miscdevice vhost_blk_misc = {
 	MISC_DYNAMIC_MINOR,
 	"vhost-blk",
 	&vhost_blk_fops,
 };
 
-static int vhost_blk_init(void)
+int vhost_blk_init(void)
 {
 	return misc_register(&vhost_blk_misc);
 }
 
-static void vhost_blk_exit(void)
+void vhost_blk_exit(void)
 {
 	misc_deregister(&vhost_blk_misc);
 }

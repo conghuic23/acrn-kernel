@@ -1869,6 +1869,7 @@ static int translate_desc(struct vhost_virtqueue *vq, u64 addr, u32 len,
 		_iov->iov_len = min((u64)len - s, size);
 		_iov->iov_base = (void __user *)(unsigned long)
 			(node->userspace_addr + addr - node->start);
+		//trace_printk("ret=%d _iov->iov_base = 0x%lx _iov->iov_len=%ld\n",ret, _iov->iov_base, _iov->iov_len);
 		s += size;
 		addr += size;
 		++ret;
