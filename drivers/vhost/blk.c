@@ -20,7 +20,6 @@
 #include <linux/blkdev.h>
 #include <linux/llist.h>
 
-#include "vhost.c"
 #include "vhost.h"
 #include "blk.h"
 
@@ -59,7 +58,8 @@ struct vhost_blk_req {
 	struct iovec status[1];
 
 	sector_t sector;
-	int write;
+	int op;
+	int op_flags;
 	u16 head;
 	long len;
 };
@@ -116,11 +116,11 @@ static inline int iov_num_pages(struct iovec *iov)
 static inline int vhost_blk_set_status(struct vhost_blk_req *req, u8 status)
 {
 	struct vhost_blk *blk = req->blk;
-	int ret;
+	struct iov_iter iov_iter;
 
-	ret = memcpy_toiovecend(req->status, &status, 0, sizeof(status));
-
-	if (ret) {
+	
+	iov_iter_init(&iov_iter, READ, req->status, 1, sizeof(req->status));
+	if (copy_to_iter(&status, sizeof(status), &iov_iter) != sizeof(status)) {
 		vq_err(&blk->vqs[VHOST_BLK_VQ_REQ].vq, "Failed to write status\n");
 		return -EFAULT;
 	}
@@ -128,13 +128,10 @@ static inline int vhost_blk_set_status(struct vhost_blk_req *req, u8 status)
 	return 0;
 }
 
-static void vhost_blk_req_done(struct bio *bio, int err)
+static void vhost_blk_req_done(struct bio *bio)
 {
 	struct vhost_blk_req *req = bio->bi_private;
 	struct vhost_blk *blk = req->blk;
-
-	if (err)
-		req->len = err;
 
 	if (atomic_dec_and_test(&req->bio_nr)) {
 		llist_add(&req->llnode, &blk->llhead);
@@ -153,7 +150,7 @@ static void vhost_blk_req_unmap(struct vhost_blk_req *req)
 		for (i = 0; i < req->iov_nr; i++) {
 			pl = &req->pl[i];
 			for (j = 0; j < pl->pages_nr; j++) {
-				if (!req->write)
+				if (!req->op)
 					set_page_dirty_lock(pl->pages[j]);
 				put_page(pl->pages[j]);
 			}
@@ -179,19 +176,19 @@ static int vhost_blk_bio_make(struct vhost_blk_req *req,
 	for (i = 0; i < iov_nr; i++)
 		pages_nr_total += iov_num_pages(&iov[i]);
 
-	if (unlikely(req->write == WRITE_FLUSH)) {
+	if (unlikely(req->op_flags == REQ_PREFLUSH)) {
 		req->use_inline = true;
 		req->pl = NULL;
 		req->bio = req->inline_bio;
 
-		bio = bio_alloc(GFP_KERNEL, 1);
+		bio = bio_alloc(GFP_KERNEL, 0);
 		if (!bio)
 			return -ENOMEM;
 
-		bio->bi_sector  = req->sector;
-		bio->bi_bdev    = bdev;
+		bio_set_dev(bio, bdev);
 		bio->bi_private = req;
 		bio->bi_end_io  = vhost_blk_req_done;
+		bio_set_op_attrs(bio, req->op, req->op_flags);
 		req->bio[bio_nr++] = bio;
 
 		goto out;
@@ -230,7 +227,7 @@ static int vhost_blk_bio_make(struct vhost_blk_req *req,
 
 		/* TODO: Limit the total number of pages pinned */
 		ret = get_user_pages_fast(iov_base, pages_nr,
-					  !req->write, pages);
+					  !req->op, pages);
 		/* No pages were pinned */
 		if (ret < 0)
 			goto fail;
@@ -260,11 +257,12 @@ bio_alloc:
 				bio = bio_alloc(GFP_KERNEL, pages_nr);
 				if (!bio)
 					goto fail;
-				bio->bi_sector  = req->sector;
-				bio->bi_bdev    = bdev;
+				bio->bi_iter.bi_sector  = req->sector;
+				bio_set_dev(bio, bdev);
 				bio->bi_private = req;
 				bio->bi_end_io  = vhost_blk_req_done;
 				req->bio[bio_nr++] = bio;
+				bio_set_op_attrs(bio, req->op, req->op_flags);
 			}
 			req->sector	+= len >> 9;
 			iov_base	+= len;
@@ -299,7 +297,7 @@ static inline void vhost_blk_bio_send(struct vhost_blk_req *req)
 	bio_nr = atomic_read(&req->bio_nr);
 	blk_start_plug(&plug);
 	for (i = 0; i < bio_nr; i++)
-		submit_bio(req->write, req->bio[i]);
+		submit_bio(req->bio[i]);
 	blk_finish_plug(&plug);
 }
 
@@ -334,6 +332,7 @@ static int vhost_blk_req_handle(struct vhost_virtqueue *vq,
 	struct vhost_blk_req *req;
 	int ret, len;
 	u8 status;
+	struct iov_iter iov_iter;
 
 	req		= &blk->reqs[head];
 	req->head	= head;
@@ -344,19 +343,23 @@ static int vhost_blk_req_handle(struct vhost_virtqueue *vq,
 	req->len	= iov_length(vq->iov, out + in) - sizeof(status);
 	req->iov_nr	= move_iovec(vq->iov, req->iov, req->len, out + in);
 
+	//iov_iter_init(&iov_iter, READ, req->iov, 1, len);
+	//ret = copy_to_iter(id, len, &iov_iter);
+
 	move_iovec(vq->iov, req->status, sizeof(status), out + in);
 
 	switch (hdr->type) {
 	case VIRTIO_BLK_T_OUT:
-		req->write = WRITE;
+		req->op = REQ_OP_WRITE;
 		ret = vhost_blk_req_submit(req, file);
 		break;
 	case VIRTIO_BLK_T_IN:
-		req->write = READ;
+		req->op = REQ_OP_READ;
 		ret = vhost_blk_req_submit(req, file);
 		break;
 	case VIRTIO_BLK_T_FLUSH:
-		req->write = WRITE_FLUSH;
+		req->op = REQ_OP_WRITE;
+		req->op_flags = REQ_PREFLUSH;
 		ret = vhost_blk_req_submit(req, file);
 		break;
 	case VIRTIO_BLK_T_GET_ID:
@@ -365,8 +368,10 @@ static int vhost_blk_req_handle(struct vhost_virtqueue *vq,
 		if (ret < 0)
 			break;
 		len = ret;
-		ret = memcpy_toiovecend(req->iov, id, 0, len);
-		status = ret < 0 ? VIRTIO_BLK_S_IOERR : VIRTIO_BLK_S_OK;
+		//ret = memcpy_toiovecend(req->iov, id, 0, len);
+		iov_iter_init(&iov_iter, READ, req->iov, 1, len);
+		ret = copy_to_iter(id, len, &iov_iter);
+		status = (ret != len) ? VIRTIO_BLK_S_IOERR : VIRTIO_BLK_S_OK;
 		ret = vhost_blk_set_status(req, status);
 		if (ret)
 			break;
@@ -405,7 +410,7 @@ static void vhost_blk_handle_guest_kick(struct vhost_work *work)
 
 	vhost_disable_notify(&blk->dev, vq);
 	for (;;) {
-		head = vhost_get_vq_desc(&blk->dev, vq, vq->iov,
+		head = vhost_get_vq_desc(vq, vq->iov,
 					 ARRAY_SIZE(vq->iov),
 					 &out, &in, NULL, NULL);
 		if (unlikely(head < 0))
@@ -418,10 +423,10 @@ static void vhost_blk_handle_guest_kick(struct vhost_work *work)
 			}
 			break;
 		}
-		move_iovec(vq->iov, &hdr_iov, sizeof(hdr), out);
-		ret = memcpy_fromiovecend((unsigned char *)&hdr, &hdr_iov, 0,
-					   sizeof(hdr));
-		if (ret < 0) {
+		//move_iovec(vq->iov, &hdr_iov, sizeof(hdr), out);
+		//ret = memcpy_fromiovecend((unsigned char *)&hdr, &hdr_iov, 0,
+		//			   sizeof(hdr));
+		if (copy_from_user(&hdr, vq->iov[0].iov_base, sizeof(hdr)) != sizeof(hdr)) {
 			vq_err(vq, "Failed to get block header!\n");
 			vhost_discard_vq_desc(vq, 1);
 			break;
@@ -544,9 +549,7 @@ static int vhost_blk_open(struct inode *inode, struct file *file)
 	spin_lock_init(&blk->flush_lock);
 	init_waitqueue_head(&blk->flush_wait);
 
-	ret = vhost_dev_init(&blk->dev, vqs, VHOST_BLK_VQ_MAX);
-	if (ret < 0)
-		goto out_dev;
+	vhost_dev_init(&blk->dev, vqs, VHOST_BLK_VQ_MAX);
 	file->private_data = blk;
 
 	vhost_work_init(&blk->work, vhost_blk_handle_host_kick);
@@ -566,7 +569,7 @@ static int vhost_blk_release(struct inode *inode, struct file *f)
 	ida_simple_remove(&vhost_blk_index_ida, blk->index);
 	vhost_blk_stop(blk, &file);
 	vhost_blk_flush(blk);
-	vhost_dev_cleanup(&blk->dev, false);
+	vhost_dev_cleanup(&blk->dev);
 	if (file)
 		fput(file);
 	kfree(blk->reqs);
@@ -578,11 +581,17 @@ static int vhost_blk_release(struct inode *inode, struct file *f)
 
 static int vhost_blk_set_features(struct vhost_blk *blk, u64 features)
 {
-	mutex_lock(&blk->dev.mutex);
-	blk->dev.acked_features = features;
-	vhost_blk_flush(blk);
-	mutex_unlock(&blk->dev.mutex);
+	struct vhost_virtqueue *vq;
+	int i;
 
+	mutex_lock(&blk->dev.mutex);
+	for (i = 0; i < VHOST_BLK_VQ_MAX; i++) {
+		vq = &blk->vqs[i].vq;
+		mutex_lock(&vq->mutex);
+		vq->acked_features = features;
+		mutex_unlock(&vq->mutex);
+	}
+	mutex_unlock(&blk->dev.mutex);
 	return 0;
 }
 
@@ -628,7 +637,7 @@ static long vhost_blk_set_backend(struct vhost_blk *blk, unsigned index, int fd)
 	if (file != oldfile) {
 		rcu_assign_pointer(vq->private_data, file);
 
-		ret = vhost_init_used(vq);
+		ret = vhost_vq_init_access(vq);
 		if (ret)
 			goto out_file;
 	}
@@ -654,7 +663,7 @@ out_dev:
 
 static long vhost_blk_reset_owner(struct vhost_blk *blk)
 {
-	struct vhost_memory *memory;
+	struct vhost_umem *memory;
 	struct file *file = NULL;
 	int err;
 

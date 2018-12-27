@@ -209,6 +209,7 @@ static int virtblk_setup_discard_write_zeroes(struct request *req, bool unmap)
 static inline void virtblk_request_done(struct request *req)
 {
 	struct virtblk_req *vbr = blk_mq_rq_to_pdu(req);
+	trace_printk("complete enter\n");
 
 	if (req->rq_flags & RQF_SPECIAL_PAYLOAD) {
 		kfree(page_address(req->special_vec.bv_page) +
@@ -223,6 +224,7 @@ static inline void virtblk_request_done(struct request *req)
 	}
 
 	blk_mq_end_request(req, virtblk_result(vbr));
+	trace_printk("complete done\n");
 }
 
 static void virtblk_done(struct virtqueue *vq)
@@ -337,8 +339,10 @@ static blk_status_t virtio_queue_rq(struct blk_mq_hw_ctx *hctx,
 		notify = true;
 	spin_unlock_irqrestore(&vblk->vqs[qid].lock, flags);
 
+	trace_printk("before virtqueue_notify\n");
 	if (notify)
 		virtqueue_notify(vblk->vqs[qid].vq);
+	trace_printk("after virtqueue_notify\n");
 	return BLK_STS_OK;
 }
 
