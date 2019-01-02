@@ -420,7 +420,7 @@ void vhost_blk_handle_guest_kick(struct vhost_work *work)
 	vq = container_of(work, struct vhost_virtqueue, poll.work);
 	blk = container_of(vq->dev, struct vhost_blk, dev);
 
-	//trace_printk("vhost_blk_handle_guest_kick enter \n");
+	trace_printk("kick enter\n");
 	/* TODO: check that we are running from vhost_worker? */
 	/************ fixme later *****************/
 	f = rcu_dereference_check(vq->private_data, 1);
@@ -459,6 +459,7 @@ void vhost_blk_handle_guest_kick(struct vhost_work *work)
 			break;
 		}
 		//trace_printk("WRITE#############head=%d hdr->type=%d her->secotr=%ld hdr->proir=%d\n", head, hdr.type, hdr.sector, hdr.ioprio);
+		trace_printk("hdr type is %d\n",hdr.type);
 
 		if (vhost_blk_req_handle(vq, &hdr, head, out, in, f) < 0)
 			break;
@@ -468,6 +469,8 @@ void vhost_blk_handle_guest_kick(struct vhost_work *work)
 			break;
 		}
 	}
+
+	trace_printk("kick exit\n");
 }
 
 /* Host kick us for I/O completion */
@@ -481,7 +484,7 @@ void vhost_blk_handle_host_kick(struct vhost_work *work)
 	bool added, zero;
 	u8 status;
 	int ret;
-	//trace_printk("vhost_blk_handle_host_kick  \n");
+	trace_printk("notify enter \n");
 	blk = container_of(work, struct vhost_blk, work);
 	vq = &blk->vqs[VHOST_BLK_VQ_REQ].vq;
 
@@ -510,6 +513,7 @@ void vhost_blk_handle_host_kick(struct vhost_work *work)
 	}
 	if (likely(added))
 		vhost_signal(&blk->dev, &blk->vqs[VHOST_BLK_VQ_REQ].vq);
+	trace_printk("notify exit\n");
 }
 
 void vhost_blk_flush(struct vhost_blk *blk)

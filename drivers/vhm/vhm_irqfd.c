@@ -131,9 +131,11 @@ static void put_irqfd_info(struct vhm_irqfd_info *info)
 static void vhm_irqfd_inject(struct acrn_vhm_irqfd *irqfd)
 {
 	struct vhm_irqfd_info *info = irqfd->info;
+	trace_printk("inject msi\n");
 
 	vhm_inject_msi(info->vmid, irqfd->msi.msi_addr,
 			irqfd->msi.msi_data);
+	trace_printk("inject exit\n");
 }
 
 /*
