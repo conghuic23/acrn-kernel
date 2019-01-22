@@ -13,11 +13,27 @@
 #include <linux/virtio_ids.h>
 #include <linux/virtio_config.h>
 
+struct virtio_i2c_outhdr {
+	__virtio16 addr;	/* slave address */
+	__virtio16 flags;
+	__virtio16 len;		/*msg length*/
+};
 
+struct virtio_i2c_msg {
+	struct virtio_i2c_outhdr out_hdr;
+	char *buf;
+	u8 status;
+#define VIRTIO_I2C_MSG_OK	0
+#define VIRTIO_I2C_MSG_ERR	1
+	struct i2c_msg *msg;
+};
+
+#define VQ_NAME_LEN  256
 struct virtio_i2c_vq {
 	spinlock_t vq_lock;
 	struct virtqueue *vq;
-};
+	char name[VQ_NAME_LEN];
+}____cacheline_aligned_in_smp;
 
 struct virtio_i2c {
 	struct virtio_device *vdev;
@@ -57,23 +73,95 @@ static void virti2c_vq_done(struct virtio_i2c *vi2c,
 
 static void virti2c_msg_done(struct virtqueue *vq)
 {
+#if 0
 	struct i2c_adapter *adap = virtio_i2c_adapter(vq->vdev);
 	struct virtio_i2c *vi2c = i2c_get_adapdata(adap);
 
 	virti2c_vq_done(vi2c, vi2c->msg_vqs);
+#endif
+
+	return;
 }
+
+static int virtio_queue_add_msg(struct virtqueue *vq,
+			struct virtio_i2c_msg *vmsg,
+			struct i2c_msg *msg)
+{
+	struct scatterlist *sgs[3], hdr, bout, bin, status;
+	int outcnt = 0, incnt = 0;
+	
+	vmsg->out_hdr.addr = msg->addr;
+	vmsg->out_hdr.flags = msg->flags;
+	vmsg->out_hdr.len = msg->len;
+
+	if (vmsg->out_hdr.len)
+		vmsg->buf = kzalloc(vmsg->out_hdr.len, GFP_ATOMIC);
+
+	sg_init_one(&hdr, &vmsg->out_hdr, sizeof(struct virtio_i2c_msg *));
+	sgs[outcnt++] = &hdr;
+
+	if (vmsg->buf) {
+		if (vmsg->out_hdr.flags & I2C_M_RD) {
+			sg_init_one(&bin, vmsg->buf, msg->len);
+			sgs[outcnt + incnt++] = &bin;
+		} else {
+			memcpy(vmsg->buf, msg->buf, msg->len);
+
+			sg_init_one(&bout, vmsg->buf, msg->len);
+			sgs[outcnt++] = &bout;
+		}
+	}
+
+	sg_init_one(&status, &vmsg->status, 1);
+	sgs[outcnt + incnt++] = &status;
+
+	return virtqueue_add_sgs(vq, sgs, outcnt, incnt, vmsg, GFP_ATOMIC);
+}
+
 
 static int virtio_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num)
 {
 	struct virtio_i2c *i2c = i2c_get_adapdata(adap);
+	struct virtqueue *vq = i2c->msg_vqs[0].vq;
+	struct virtio_i2c_msg *vmsg, *msg_r;
+	unsigned long flags;
+	int len, i, ret;
+	bool notify;
+	ret = 0;
+	notify = false;
+	vmsg = kzalloc(sizeof(*vmsg), GFP_ATOMIC);
+	vmsg->buf = NULL;
 
-	i2c->msg = msgs;
-	i2c->pos = 0;
-	i2c->nmsgs = num;
-	i2c->state = 0;
-	/* add vq send function*/
-	return num;
+	for (i = 0; i < num; i++) {
+		spin_lock_irqsave(&i2c->msg_vqs[0].vq_lock, flags);
+		ret = virtio_queue_add_msg(vq, vmsg, &msgs[i]);
+		if (virtqueue_kick_prepare(vq))
+			notify = true;
+		spin_unlock_irqrestore(&i2c->msg_vqs[0].vq_lock, flags);
+		if (notify)
+			virtqueue_notify(vq);
+		
+		if ((msg_r = (struct virtio_i2c_msg *)virtqueue_get_buf(vq, &len)) != NULL) {
+			if (msg_r->status != VIRTIO_I2C_MSG_OK) {
+				ret = i - 1;
+				goto err;
+			}
+			if ((msg_r->out_hdr.flags & I2C_M_RD) &&  msg_r->out_hdr.len)
+				memcpy(msgs[i].buf, msg_r->buf, msg_r->out_hdr.len);
+			if (msg_r->buf)
+				kfree(msg_r->buf);
+		}
+
+	}
+	if (i == num)
+		ret = num;
+
+err:
+	kfree(vmsg);
+	return ret;
 }
+
+
 static void virtio_i2c_init_vq(struct virtio_i2c_vq *virtio_i2c_vq, struct virtqueue *vq)
 {
 	spin_lock_init(&virtio_i2c_vq->vq_lock);
