@@ -218,14 +218,18 @@ static acpi_status i2c_acpi_add_device(acpi_handle handle, u32 level,
 void i2c_acpi_register_devices(struct i2c_adapter *adap)
 {
 	acpi_status status;
+	printk(KERN_ERR "i2c_acpi_register_devices enter \n");
 
 	if (!has_acpi_companion(&adap->dev))
 		return;
 
+	printk(KERN_ERR "i2c_acpi_register_devices enter 2 \n");
 	status = acpi_walk_namespace(ACPI_TYPE_DEVICE, ACPI_ROOT_OBJECT,
 				     I2C_ACPI_MAX_SCAN_DEPTH,
 				     i2c_acpi_add_device, NULL,
 				     adap, NULL);
+
+	printk(KERN_ERR "i2c_acpi_register_devices enter 3 status=%d \n",status);
 	if (ACPI_FAILURE(status))
 		dev_warn(&adap->dev, "failed to enumerate I2C slaves\n");
 }

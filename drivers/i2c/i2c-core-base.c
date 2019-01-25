@@ -1281,7 +1281,9 @@ static int i2c_register_adapter(struct i2c_adapter *adap)
 
 	/* create pre-declared device nodes */
 	of_i2c_register_devices(adap);
+	printk(KERN_ERR "before i2c_acpi_register_devices \n");
 	i2c_acpi_register_devices(adap);
+	printk(KERN_ERR "after  i2c_acpi_register_devices \n");
 	i2c_acpi_install_space_handler(adap);
 
 	if (adap->nr < __i2c_first_dynamic_bus_num)

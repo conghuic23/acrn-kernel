@@ -170,6 +170,7 @@ void pcibios_fixup_bus(struct pci_bus *b)
 
 void pcibios_add_bus(struct pci_bus *bus)
 {
+	printk(KERN_ERR "pcibios_add_bus !!!!!!!!!11\n\n\n");
 	acpi_pci_add_bus(bus);
 }
 

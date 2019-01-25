@@ -647,12 +647,17 @@ void acpi_pci_add_bus(struct pci_bus *bus)
 {
 	union acpi_object *obj;
 	struct pci_host_bridge *bridge;
+	printk(KERN_ERR "acpi_pci_disabled=%d !bus->bridge=%d !ACPI_HANDLE(bus->bridge)=%d\n\n\n",
+			acpi_pci_disabled, !bus->bridge,  !ACPI_HANDLE(bus->bridge));
 
 	if (acpi_pci_disabled || !bus->bridge || !ACPI_HANDLE(bus->bridge))
 		return;
 
+	printk(KERN_ERR "before acpi_pci_slot_enumerate \n\n\n");
 	acpi_pci_slot_enumerate(bus);
+	printk(KERN_ERR "after  acpi_pci_slot_enumerate \n\n\n");
 	acpiphp_enumerate_slots(bus);
+	printk(KERN_ERR "after   acpiphp_enumerate_slots\n\n\n");
 
 	/*
 	 * For a host bridge, check its _DSM for function 8 and if
@@ -666,6 +671,7 @@ void acpi_pci_add_bus(struct pci_bus *bus)
 	if (!obj)
 		return;
 
+	printk(KERN_ERR "after   acpi_evaluate_dsm \n\n\n");
 	if (obj->type == ACPI_TYPE_INTEGER && obj->integer.value == 1) {
 		bridge = pci_find_host_bridge(bus);
 		bridge->ignore_reset_delay = 1;
