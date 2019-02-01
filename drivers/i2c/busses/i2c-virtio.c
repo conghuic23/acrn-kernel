@@ -205,7 +205,6 @@ static int virtio_i2c_init(struct virtio_device *vdev, struct virtio_i2c *virtio
 	for (i=0; i < num_vqs; i++)
 		virtio_i2c_init_vq(&virtio_i2c->msg_vqs[i], vqs[i]);
 
-	trace_printk(" virtio_i2c_init done !!! \n");
 	return 0;
 }
 
@@ -235,11 +234,9 @@ static int virtio_i2c_probe(struct virtio_device *vdev)
 
 	pdev = vdev->dev.parent;
 
-	printk(KERN_ERR "before ACPI_COMPANION\n");
 	if (!ACPI_COMPANION(pdev))
 		printk(KERN_ERR "virtio i2c adap does not have acpi node\n");
 
-	printk(KERN_ERR "after ACPI_COMPANION\n");
 	virtio_i2c = devm_kzalloc(&vdev->dev, sizeof(*virtio_i2c), GFP_KERNEL);
 	if (!virtio_i2c)
 		return -ENOMEM;
@@ -256,28 +253,20 @@ static int virtio_i2c_probe(struct virtio_device *vdev)
 	if (ret)
 		return ret;
 
-//shost->can_queue = virtqueue_get_vring_size(vscsi->req_vqs[0].vq);
 	virtio_i2c->adap = virtio_adapter;
 	i2c_set_adapdata(&virtio_i2c->adap, virtio_i2c);
-	//virtio_i2c->adap.dev.parent = &vdev->dev;
 	
-	printk(KERN_ERR " virtio_i2c->adap.dev.parent = &vdev->dev \n");
-	//virtio_i2c->adap.dev.parent = pdev;
-	// change here to virtio device !!!!!!!!!!!!!!!!!!!!!!
 	virtio_i2c->adap.dev.parent = &vdev->dev;
 	vdev->priv = &virtio_adapter;
 
-	printk(KERN_ERR "before set acpi\n");
 	ACPI_COMPANION_SET(&virtio_i2c->adap.dev, ACPI_COMPANION(pdev));
 
-	printk(KERN_ERR "after set acpi\n");
 	/* add i2c adapter to i2c tree */
 	ret = i2c_add_adapter(&virtio_i2c->adap);
 	if (ret)
 		return ret;
 	/* add in known devices to the bus */
 
-	printk(KERN_ERR "after add adapter\n");
 	return ret;
 }
 
