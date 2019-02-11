@@ -1,4 +1,6 @@
 #include <linux/clk.h>
+#include <linux/completion.h>
+#include <linux/jiffies.h>
 #include <linux/err.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -13,6 +15,8 @@
 #include <linux/virtio_ids.h>
 #include <linux/virtio_config.h>
 #include <linux/acpi.h>
+
+#define VIRTIO_I2C_TIMEOUT	msecs_to_jiffies(4 * 1000)
 
 struct virtio_i2c_outhdr {
 	__virtio16 addr;	/* slave address */
@@ -38,11 +42,8 @@ struct virtio_i2c_vq {
 
 struct virtio_i2c {
 	struct virtio_device *vdev;
-
 	u32 num_queues;
-
-	u32 reg_shift;
-	u32 reg_io_width;
+	struct completion completion;
 	struct i2c_adapter adap;
 	struct i2c_msg *msg;
 	int pos;
@@ -54,32 +55,17 @@ struct virtio_i2c {
 	struct virtio_i2c_vq msg_vqs[];
 };
 
-static inline struct i2c_adapter *virtio_i2c_adapter(struct virtio_device *vdev)
+static inline struct virtio_i2c *virtio_i2c_adapter(struct virtio_device *vdev)
 {
 	return vdev->priv;
 }
 
-static void virti2c_vq_done(struct virtio_i2c *vi2c,
-			struct virtio_i2c_vq *virti2c_vq)
-{
-	struct virtqueue *vq=virti2c_vq->vq;
-	unsigned int len;
-	unsigned long flags;
-
-	spin_lock_irqsave(&virti2c_vq->vq_lock, flags);
-	virtqueue_get_buf(vq, &len);
-	spin_unlock_irqrestore(&virti2c_vq->vq_lock, flags);
-}
-
-
 static void virti2c_msg_done(struct virtqueue *vq)
 {
-#if 0
-	struct i2c_adapter *adap = virtio_i2c_adapter(vq->vdev);
-	struct virtio_i2c *vi2c = i2c_get_adapdata(adap);
+	struct virtio_i2c *i2c = virtio_i2c_adapter(vq->vdev);
 
-	virti2c_vq_done(vi2c, vi2c->msg_vqs);
-#endif
+	printk(KERN_ERR "virti2c_msg_done receive \n");
+	complete(&i2c->completion);
 
 	return;
 }
@@ -94,6 +80,8 @@ static int virtio_queue_add_msg(struct virtqueue *vq,
 	vmsg->out_hdr.addr = msg->addr;
 	vmsg->out_hdr.flags = msg->flags;
 	vmsg->out_hdr.len = msg->len;
+
+	printk(KERN_ERR "add msg: addr=%x, flags=%d len=%d\n", msg->addr, msg->flags, msg->len);
 
 	if (vmsg->out_hdr.len)
 		vmsg->buf = kzalloc(vmsg->out_hdr.len, GFP_ATOMIC);
@@ -127,31 +115,48 @@ static int virtio_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num)
 	struct virtio_i2c_msg *vmsg, *msg_r;
 	unsigned long flags;
 	int len, i, ret;
-	bool notify;
+	unsigned long time_left;
+
+
+	printk(KERN_ERR " virtio_xfer vq=%p\n", vq);
 	ret = 0;
-	notify = false;
+	if (unlikely(!vq))
+		return ret;
+
 	vmsg = kzalloc(sizeof(*vmsg), GFP_ATOMIC);
 	vmsg->buf = NULL;
 
 	for (i = 0; i < num; i++) {
+		printk(KERN_ERR "start to add msg for  %d  vq=%p\n",i,vq);
 		spin_lock_irqsave(&i2c->msg_vqs[0].vq_lock, flags);
 		ret = virtio_queue_add_msg(vq, vmsg, &msgs[i]);
-		if (virtqueue_kick_prepare(vq))
-			notify = true;
 		spin_unlock_irqrestore(&i2c->msg_vqs[0].vq_lock, flags);
-		if (notify)
-			virtqueue_notify(vq);
+
+		printk(KERN_ERR "after add msg for %d \n",i);
+		virtqueue_notify(vq);
+		printk(KERN_ERR "wait for complete\n");
+		/*wait for complete*/
+		time_left = wait_for_completion_timeout(&i2c->completion,
+						adap->timeout);
+		if (!time_left) {
+			printk(KERN_ERR "error for msg%d\n", i);
+			ret = i ? (i - 1) : 0;
+			goto err; 	
+		}
 		
+		printk(KERN_ERR "and continue on get buf \n");
 		if ((msg_r = (struct virtio_i2c_msg *)virtqueue_get_buf(vq, &len)) != NULL) {
 			if (msg_r->status != VIRTIO_I2C_MSG_OK) {
 				ret = i - 1;
 				goto err;
 			}
-			if ((msg_r->out_hdr.flags & I2C_M_RD) &&  msg_r->out_hdr.len)
+			if ((msg_r->out_hdr.flags & I2C_M_RD) && msg_r->out_hdr.len)
 				memcpy(msgs[i].buf, msg_r->buf, msg_r->out_hdr.len);
 			if (msg_r->buf)
 				kfree(msg_r->buf);
 		}
+		reinit_completion(&i2c->completion);
+		printk(KERN_ERR "reinit completion \n");
 
 	}
 	if (i == num)
@@ -196,15 +201,16 @@ static int virtio_i2c_init(struct virtio_device *vdev, struct virtio_i2c *virtio
 	}
 	for (i = 0; i < num_vqs; i++) {
 		callbacks[i] = virti2c_msg_done;
-		names[i] = "msg";
+		snprintf(virtio_i2c->msg_vqs[i].name, VQ_NAME_LEN, "msg.%d", i);
+		names[i] = virtio_i2c->msg_vqs[i].name;
 	}
 
 	err = virtio_find_vqs(vdev, num_vqs, vqs, callbacks, names, NULL);
 	if (err)
 		return err;
-	for (i=0; i < num_vqs; i++)
+	for (i = 0; i < num_vqs; i++) {
 		virtio_i2c_init_vq(&virtio_i2c->msg_vqs[i], vqs[i]);
-
+	}
 	return 0;
 }
 
@@ -241,14 +247,9 @@ static int virtio_i2c_probe(struct virtio_device *vdev)
 	if (!virtio_i2c)
 		return -ENOMEM;
 	/*get config data from FE*/
-	virtio_i2c->reg_shift = 0;
-	virtio_i2c->reg_io_width = 0;
-	virtio_i2c->ip_clock_khz = 0;
-	virtio_i2c->bus_clock_khz = 100;
 	virtio_i2c->num_queues = 1;
 
-	if (virtio_i2c->reg_io_width == 0)
-		virtio_i2c->reg_io_width = 1; /* Set to default value */
+	init_completion(&virtio_i2c->completion);
 	ret = virtio_i2c_init(vdev, virtio_i2c);
 	if (ret)
 		return ret;
@@ -257,25 +258,24 @@ static int virtio_i2c_probe(struct virtio_device *vdev)
 	i2c_set_adapdata(&virtio_i2c->adap, virtio_i2c);
 	
 	virtio_i2c->adap.dev.parent = &vdev->dev;
-	vdev->priv = &virtio_adapter;
+	vdev->priv = virtio_i2c;
 
 	ACPI_COMPANION_SET(&virtio_i2c->adap.dev, ACPI_COMPANION(pdev));
+	virtio_i2c->adap.timeout = VIRTIO_I2C_TIMEOUT;
 
 	/* add i2c adapter to i2c tree */
 	ret = i2c_add_adapter(&virtio_i2c->adap);
 	if (ret)
 		return ret;
-	/* add in known devices to the bus */
 
 	return ret;
 }
 
 static void virtio_i2c_remove(struct virtio_device *vdev)
 {
-	struct i2c_adapter *i2c = virtio_i2c_adapter(vdev);
+	struct virtio_i2c *i2c = virtio_i2c_adapter(vdev);
 
-	i2c_del_adapter(i2c);
-
+	i2c_del_adapter(&i2c->adap);
 	virtio_i2c_remove_vqs(vdev);
 }
 static struct virtio_device_id id_table[] = {
