@@ -232,6 +232,7 @@ static long vhm_dev_ioctl(struct file *filep,
 			goto create_vm_fail;
 		}
 		vm->vmid = created_vm->vmid;
+		atomic_set(&vm->vcpu_num, created_vm->vcpu_num);
 
 		if (created_vm->req_buf) {
 			ret = acrn_ioreq_init(vm, created_vm->req_buf);
@@ -243,7 +244,8 @@ static long vhm_dev_ioctl(struct file *filep,
 		acrn_irqfd_init(vm->vmid);
 		acrn_mempool_free(created_vm);
 
-		pr_info("vhm: VM %ld created\n", vm->vmid);
+		pr_info("vhm: VM %ld created with %d vcpus.\n",
+				vm->vmid, atomic_read(&vm->vcpu_num));
 		break;
 
 create_vm_fail:
@@ -284,29 +286,6 @@ create_vm_fail:
 	case IC_DESTROY_VM: {
 		ret = vhm_vm_destroy(vm);
 		break;
-	}
-
-	case IC_CREATE_VCPU: {
-		struct acrn_create_vcpu *cv;
-
-		cv = acrn_mempool_alloc(GFP_KERNEL);
-		if (copy_from_user(cv, (void *)ioctl_param,
-				sizeof(struct acrn_create_vcpu))) {
-			acrn_mempool_free(cv);
-			return -EFAULT;
-		}
-
-		ret = acrn_hypercall2(HC_CREATE_VCPU, vm->vmid,
-				virt_to_phys(cv));
-		if (ret < 0) {
-			pr_err("vhm: failed to create vcpu %d!\n", cv->vcpu_id);
-			acrn_mempool_free(cv);
-			return -EFAULT;
-		}
-		atomic_inc(&vm->vcpu_num);
-		acrn_mempool_free(cv);
-
-		return ret;
 	}
 
 	case IC_SET_VCPU_REGS: {
