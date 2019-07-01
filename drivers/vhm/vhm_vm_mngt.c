@@ -117,7 +117,7 @@ int vhm_get_vm_info(unsigned long vmid, struct vm_info *info)
 		return -EINVAL;
 	}
 	/*TODO: hardcode max_vcpu here, should be fixed by getting at runtime */
-	info->max_vcpu = 4;
+	info->max_vcpu = 16;
 	info->max_gfn = vm->max_gfn;
 	put_vm(vm);
 	return 0;
