@@ -159,7 +159,7 @@ struct virtio_dev_info {
 	 * This is the callback function to be registered to VHM,
 	 * so that VBS gets notified when frontend accessed the register.
 	 */
-	int (*dev_notify)(int, unsigned long *);
+	int (*dev_notify)(int, int);
 	/** @vqs: virtqueue(s) of this device */
 	struct virtio_vq_info *vqs;
 	/** @curq: current virtqueue index */
@@ -254,7 +254,7 @@ long virtio_dev_deregister(struct virtio_dev_info *dev);
  * Return: Number of vq request
  */
 int virtio_vqs_index_get(struct virtio_dev_info *dev,
-						unsigned long *ioreqs_map,
+						int vcpu,
 						int *vqs_index,
 						int max_vqs_index);
 

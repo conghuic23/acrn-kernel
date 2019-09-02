@@ -45,11 +45,11 @@ struct snd_skl_vbe_client *vbe_client_find(struct snd_skl_vbe *vbe,
 	return NULL;
 }
 
-static int vskl_vbs_handle_kick(int client_id, unsigned long *ioreqs_map)
+static int vskl_vbs_handle_kick(int client_id, int vcpu)
 {
 	struct vhm_request *req;
 	struct snd_skl_vbe_client *client;
-	int vcpu, handle;
+	int handle;
 	struct vskl *vskl = get_virtio_audio();
 	struct snd_skl_vbe *vbe = &vskl->vbe;
 
@@ -70,9 +70,6 @@ static int vskl_vbs_handle_kick(int client_id, unsigned long *ioreqs_map)
 
 	/* go through all vcpu for the valid request buffer */
 	while (1) {
-		vcpu = find_first_bit(ioreqs_map, client->max_vcpu);
-		if (vcpu == client->max_vcpu)
-			break;
 		req = &client->req_buf[vcpu];
 		if (atomic_read(&req->processed) != REQ_STATE_PROCESSING ||
 				req->client != client->vhm_client_id)

@@ -149,13 +149,12 @@ long virtio_dev_deregister(struct virtio_dev_info *dev)
 }
 
 int virtio_vqs_index_get(struct virtio_dev_info *dev,
-						unsigned long *ioreqs_map,
+						int vcpu,
 						int *vqs_index,
 						int max_vqs_index)
 {
 	int idx = 0;
 	struct vhm_request *req;
-	int vcpu;
 
 	if (dev == NULL) {
 		pr_err("%s: dev is NULL!\n", __func__);
@@ -163,9 +162,6 @@ int virtio_vqs_index_get(struct virtio_dev_info *dev,
 	}
 
 	while (1) {
-		vcpu = find_first_bit(ioreqs_map, dev->_ctx.max_vcpu);
-		if (vcpu == dev->_ctx.max_vcpu)
-			break;
 		req = &dev->_ctx.req_buf[vcpu];
 		if (atomic_read(&req->processed) == REQ_STATE_PROCESSING &&
 		    req->client == dev->_ctx.vhm_client_id) {

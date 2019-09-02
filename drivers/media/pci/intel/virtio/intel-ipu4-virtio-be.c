@@ -50,7 +50,7 @@ DECLARE_HASHTABLE(HASH_NAME, RNG_MAX_HASH_BITS);
 static int ipu_vbk_hash_initialized;
 static int ipu_vbk_connection_cnt;
 /* function declarations */
-static int handle_kick(int client_id, long unsigned int *req_cnt);
+static int handle_kick(int client_id, int );
 static int ipu_vbk_reset(struct ipu4_virtio_be_priv *priv);
 static void ipu_vbk_stop(struct ipu4_virtio_be_priv *priv);
 static void ipu_vbk_flush(struct ipu4_virtio_be_priv *priv);
@@ -224,13 +224,10 @@ static void handle_vq_kick(int client_id, int vq_idx)
 		virtio_vq_endchains(vq, 1);
 }
 
-static int handle_kick(int client_id, long unsigned *ioreqs_map)
+static int handle_kick(int client_id, int vcpu)
 {
 	int *val, i, count;
 	struct ipu4_virtio_be_priv *priv;
-
-	if (unlikely(bitmap_empty(ioreqs_map, VHM_REQUEST_MAX)))
-		return -EINVAL;
 
 	priv = ipu_vbk_hash_find(client_id);
 	if (priv == NULL) {
@@ -239,11 +236,9 @@ static int handle_kick(int client_id, long unsigned *ioreqs_map)
 		return -EINVAL;
 	}
 
-	val = kzalloc(priv->dev._ctx.max_vcpu * sizeof(int),
-										GFP_KERNEL);
+	val = kzalloc(priv->dev._ctx.max_vcpu * sizeof(int), GFP_KERNEL);
 
-	count = virtio_vqs_index_get(&priv->dev, ioreqs_map, val,
-								priv->dev._ctx.max_vcpu);
+	count = virtio_vqs_index_get(&priv->dev, vcpu, val, priv->dev._ctx.max_vcpu);
 
 	for (i = 0; i < count; i++) {
 		if (val[i] >= 0) {

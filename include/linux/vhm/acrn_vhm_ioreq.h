@@ -61,7 +61,7 @@
 #include <linux/poll.h>
 #include <linux/vhm/vhm_vm_mngt.h>
 
-typedef	int (*ioreq_handler_t)(int client_id, unsigned long *ioreqs_map);
+typedef	int (*ioreq_handler_t)(int client_id, int vcpu);
 
 /**
  * acrn_ioreq_create_client - create ioreq client

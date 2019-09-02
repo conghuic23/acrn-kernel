@@ -162,12 +162,11 @@ static void virtio_be_handle_vq_kick(
 /*
  *  Received new buffer in virtqueue
  */
-static int virtio_be_handle_kick(int client_id, unsigned long *ioreqs_map)
+static int virtio_be_handle_kick(int client_id, int vcpu)
 {
 	int *val, i, count = 0;
 	struct vhm_request *req;
 	struct virtio_fe_info *fe_info;
-	int vcpu;
 
 	fe_info = virtio_fe_find(client_id);
 	if (fe_info == NULL) {
@@ -179,27 +178,21 @@ static int virtio_be_handle_kick(int client_id, unsigned long *ioreqs_map)
 	if (val == NULL)
 		return -ENOMEM;
 
-	while (1) {
-		vcpu = find_first_bit(ioreqs_map, fe_info->max_vcpu);
-		if (vcpu == fe_info->max_vcpu)
-			break;
-		req = &fe_info->req_buf[vcpu];
-		if (atomic_read(&req->processed) == REQ_STATE_PROCESSING &&
-		    req->client == fe_info->client_id) {
-			if (req->reqs.pio_request.direction == REQUEST_READ)
-				req->reqs.pio_request.value = 0;
-			else
-				val[count] = req->reqs.pio_request.value;
+	req = &fe_info->req_buf[vcpu];
+	if (atomic_read(&req->processed) == REQ_STATE_PROCESSING &&
+	    req->client == fe_info->client_id) {
+		if (req->reqs.pio_request.direction == REQUEST_READ)
+			req->reqs.pio_request.value = 0;
+		else
+			val[count] = req->reqs.pio_request.value;
 
-			acrn_ioreq_complete_request(
-					fe_info->client_id, vcpu, req);
-			count++;
-			if (count >= fe_info->max_vcpu) {
-				dev_warn(hy_drv_priv->dev,
-					"client %d ignore req on high vCPUs\n",
-					 client_id);
-				break;
-			}
+		acrn_ioreq_complete_request(
+				fe_info->client_id, vcpu, req);
+		count++;
+		if (count >= fe_info->max_vcpu) {
+			dev_warn(hy_drv_priv->dev,
+				"client %d ignore req on high vCPUs\n",
+				 client_id);
 		}
 	}
 

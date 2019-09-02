@@ -122,7 +122,7 @@ static int vbs_rng_hash_initialized = 0;
 static int vbs_rng_connection_cnt = 0;
 
 /* function declarations */
-static int handle_kick(int client_id, unsigned long *ioreqs_map);
+static int handle_kick(int client_id, int vcpu);
 static long vbs_rng_reset(struct vbs_rng *rng);
 static void vbs_rng_stop(struct vbs_rng *rng);
 static void vbs_rng_flush(struct vbs_rng *rng);
@@ -251,13 +251,10 @@ static void handle_vq_kick(struct vbs_rng *rng, int vq_idx)
 	virtio_vq_endchains(vq, 1);	/* Generate interrupt if appropriate. */
 }
 
-static int handle_kick(int client_id, unsigned long *ioreqs_map)
+static int handle_kick(int client_id, int vcpu)
 {
 	int val = -1;
 	struct vbs_rng *rng;
-
-	if (unlikely(bitmap_empty(ioreqs_map, VHM_REQUEST_MAX)))
-		return 0;
 
 	pr_debug("%s: handle kick!\n", __func__);
 
@@ -268,7 +265,7 @@ static int handle_kick(int client_id, unsigned long *ioreqs_map)
 		return -EINVAL;
 	}
 
-	virtio_vqs_index_get(&rng->dev, ioreqs_map, &val, 1);
+	virtio_vqs_index_get(&rng->dev, vcpu, &val, 1);
 
 	if (val >= 0)
 		handle_vq_kick(rng, val);

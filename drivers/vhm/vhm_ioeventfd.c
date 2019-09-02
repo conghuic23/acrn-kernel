@@ -323,8 +323,7 @@ static struct acrn_vhm_ioeventfd *vhm_ioeventfd_match(
 	return NULL;
 }
 
-static int acrn_ioeventfd_dispatch_ioreq(int client_id,
-		unsigned long *ioreqs_map)
+static int acrn_ioeventfd_dispatch_ioreq(int client_id, int vcpu)
 {
 	struct vhm_request *req;
 	struct acrn_vhm_ioeventfd *p;
@@ -332,7 +331,6 @@ static int acrn_ioeventfd_dispatch_ioreq(int client_id,
 	u64 addr;
 	u64 val;
 	int size;
-	int vcpu;
 
 	info = get_ioeventfd_info_by_client(client_id);
 	if (!info)
@@ -350,9 +348,6 @@ static int acrn_ioeventfd_dispatch_ioreq(int client_id,
 	}
 
 	while (1) {
-		vcpu = find_first_bit(ioreqs_map, info->vcpu_num);
-		if (vcpu == info->vcpu_num)
-			break;
 		req = &info->req_buf[vcpu];
 		if (atomic_read(&req->processed) == REQ_STATE_PROCESSING &&
 			req->client == client_id) {
