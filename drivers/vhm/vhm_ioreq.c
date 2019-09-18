@@ -147,7 +147,7 @@ struct ioreq_client {
 };
 
 #define MAX_CLIENT 1024
-static void acrn_ioreq_notify_client(struct ioreq_client *client);
+static void acrn_ioreq_notify_client(struct ioreq_client *client, int tcpu);
 
 static inline bool is_range_type(uint32_t type)
 {
@@ -378,7 +378,7 @@ static void acrn_ioreq_remove_client_pervm(struct ioreq_client *client,
 	struct list_head *pos, *tmp;
 
 	set_bit(IOREQ_CLIENT_DESTROYING, &client->flags);
-	acrn_ioreq_notify_client(client);
+	acrn_ioreq_notify_client(client, 0);
 
 	while (client->vhm_create_kthread && !test_bit(IOREQ_CLIENT_EXIT, &client->flags)
 			&& test_bit(IOREQ_THREAD_START, &client->flags))
@@ -673,14 +673,14 @@ int acrn_ioreq_attach_client(int client_id, bool check_kthread_stop)
 		might_sleep();
 
 		if (check_kthread_stop) {
-			wait_event_freezable(*per_cpu_ptr(client->wq, smp_processor_id()),
+			wait_event_freezable(*per_cpu_ptr(client->wq, raw_smp_processor_id()),
 				(kthread_should_stop() ||
 				has_pending_request(client) ||
 				is_destroying(client)));
 			if (kthread_should_stop())
 				set_bit(IOREQ_CLIENT_EXIT, &client->flags);
 		} else {
-			wait_event_freezable(*per_cpu_ptr(client->wq, smp_processor_id()),
+			wait_event_freezable(*per_cpu_ptr(client->wq, raw_smp_processor_id()),
 				(has_pending_request(client) ||
 				is_destroying(client)));
 		}
@@ -738,13 +738,17 @@ void acrn_ioreq_unintercept_bdf(int client_id)
 	acrn_ioreq_put_client(client);
 }
 
-static void acrn_ioreq_notify_client(struct ioreq_client *client)
+static void acrn_ioreq_notify_client(struct ioreq_client *client, int vcpu)
 {
 	int cpu = raw_smp_processor_id();
 	/* if client thread is in waitqueue, wake up it */
-	if (waitqueue_active(per_cpu_ptr(client->wq, cpu))) {
-		trace_printk("notify client[%s] [%d]\n", client->name, client->id);
-		wake_up_interruptible(per_cpu_ptr(client->wq, cpu));
+	if (cpu != vcpu) {
+		printk(KERN_ERR "!!!! current cpu=%d target_cpu = %d\n", cpu, vcpu);
+
+	}
+	if (waitqueue_active(per_cpu_ptr(client->wq, vcpu))) {
+		//trace_printk("notify client[%s] [%d]\n", client->name, client->id);
+		wake_up_interruptible(per_cpu_ptr(client->wq, vcpu));
 	}
 }
 
@@ -754,8 +758,9 @@ static int ioreq_complete_request(unsigned long vmid, int vcpu,
 	bool polling_mode;
 
 	polling_mode = vhm_req->completion_polling;
-	smp_mb();
-	atomic_set(&vhm_req->processed, REQ_STATE_COMPLETE);
+
+	vhm_req->client = -1;
+	atomic_set_release(&vhm_req->processed, REQ_STATE_COMPLETE);
 	/*
 	 * In polling mode, HV will poll ioreqs' completion.
 	 * Once marked the ioreq as REQ_STATE_COMPLETE, hypervisor side
@@ -765,7 +770,7 @@ static int ioreq_complete_request(unsigned long vmid, int vcpu,
 	 * as complete, or we will race with hypervisor.
 	 */
 	if (!polling_mode) {
-		trace_printk("req finish on vcpu[%d] vm[%ld]\n", vcpu, vmid);
+		//trace_printk("req finish on vcpu[%d] vm[%ld]\n", vcpu, vmid);
 		if (hcall_notify_req_finish(vmid, vcpu) < 0) {
 			pr_err("vhm-ioreq: notify request complete failed!\n");
 			return -EFAULT;
@@ -870,7 +875,7 @@ static int handle_cf8cfc(struct vhm_vm *vm, struct vhm_request *req, int vcpu)
 		}
 	}
 
-	trace_printk("req_handled[%d]\n", req_handled);
+	//trace_printk("req_handled[%d]\n", req_handled);
 	if (req_handled)
 		err = ioreq_complete_request(vm->vmid, vcpu, req);
 
@@ -975,7 +980,7 @@ int acrn_ioreq_distribute_request(struct vhm_vm *vm)
 	struct vhm_request *req;
 	struct list_head *pos;
 	struct ioreq_client *client;
-	int vcpu, vcpu_num;
+	int vcpu, vcpu_num,i;
 
 	vcpu = raw_smp_processor_id();
 	vcpu_num = atomic_read(&vm->vcpu_num);
@@ -983,20 +988,25 @@ int acrn_ioreq_distribute_request(struct vhm_vm *vm)
 		pr_err("Ignore IO request on non-exist vcpu[%d]!\n", vcpu);
 		return -EINVAL;
 	}
+	smp_mb();
 
 	req = vm->req_buf->req_queue + vcpu;
 
 	/* This function is called in tasklet only on SOS CPU0. Thus it
 	 * is safe to read the state first and update it later as long
 	 * as the update is atomic. */
+	if (vcpu == 3)
 	trace_printk("vcpu[%d] req status[%d] type[%d] [%llx][%llx][%llx][%llx]\n", vcpu, atomic_read(&req->processed),
 			req->type,
 			req->reqs.reserved1[0],	req->reqs.reserved1[1],
 			req->reqs.reserved1[2],	req->reqs.reserved1[3]
 		    );
+
 	if (atomic_read(&req->processed) == REQ_STATE_PENDING) {
-		if (handle_cf8cfc(vm, req, vcpu))
+		if (handle_cf8cfc(vm, req, vcpu)) {
+
 			return 0;
+		}
 		handle_pcie_cfg(vm, req, vcpu);
 		client = acrn_ioreq_find_client_by_request(vm, req);
 		if (client == NULL) {
@@ -1005,17 +1015,28 @@ int acrn_ioreq_distribute_request(struct vhm_vm *vm)
 			return -EINVAL;
 		} else {
 			req->client = client->id;
-			atomic_set(&req->processed, REQ_STATE_PROCESSING);
+			atomic_set_release(&req->processed,
+					REQ_STATE_PROCESSING);
 			set_bit(vcpu, client->ioreqs_map);
 			acrn_ioreq_put_client(client);
+		}
+	} else {
+		trace_printk("process not = pending ");
+	
+		for (i = 0; i < vcpu_num; i++) {
+		req = vm->req_buf->req_queue + i;
+		if (atomic_read(&req->processed) == REQ_STATE_PENDING) {
+			printk(KERN_ERR "!!!!! irq is on %d but req is on %d\n",vcpu, i);
+		}
 		}
 	}
 
 	spin_lock(&vm->ioreq_client_lock);
 	list_for_each(pos, &vm->ioreq_client_list) {
 		client = container_of(pos, struct ioreq_client, list);
-		if (has_pending_request(client))
-			acrn_ioreq_notify_client(client);
+		if (has_pending_request(client)) {
+			acrn_ioreq_notify_client(client, vcpu);
+		}
 	}
 	spin_unlock(&vm->ioreq_client_lock);
 

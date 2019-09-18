@@ -179,8 +179,7 @@ static int virtio_be_handle_kick(int client_id, int vcpu)
 		return -ENOMEM;
 
 	req = &fe_info->req_buf[vcpu];
-	if (atomic_read(&req->processed) == REQ_STATE_PROCESSING &&
-	    req->client == fe_info->client_id) {
+	if (is_ioreq_ready_for_process(req, fe_info->client_id)) {
 		if (req->reqs.pio_request.direction == REQUEST_READ)
 			req->reqs.pio_request.value = 0;
 		else

@@ -71,8 +71,7 @@ static int vskl_vbs_handle_kick(int client_id, int vcpu)
 	/* go through all vcpu for the valid request buffer */
 	while (1) {
 		req = &client->req_buf[vcpu];
-		if (atomic_read(&req->processed) != REQ_STATE_PROCESSING ||
-				req->client != client->vhm_client_id)
+		if (!is_ioreq_ready_for_process(req, client->vhm_client_id))
 			continue;
 
 		handle = 0;

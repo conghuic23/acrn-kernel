@@ -259,9 +259,7 @@ static int acrngt_emulation_thread(void *priv)
 			return 0;
 
 		req = &info->req_buf[vcpu];
-		if (atomic_read(&req->processed) ==
-			      REQ_STATE_PROCESSING &&
-			      req->client == info->client) {
+		if (is_ioreq_ready_for_process(req, info->client)) {
 		       gvt_dbg_core("handle ioreq type %d\n",
 				     req->type);
 		       switch (req->type) {
