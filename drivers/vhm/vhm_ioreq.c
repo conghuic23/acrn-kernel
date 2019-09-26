@@ -751,13 +751,9 @@ static void acrn_ioreq_notify_client(struct ioreq_client *client, int vcpu)
 {
 	int cpu = raw_smp_processor_id();
 	/* if client thread is in waitqueue, wake up it */
-	if (cpu != vcpu) {
-		printk(KERN_ERR "!!!! current cpu=%d target_cpu = %d\n", cpu, vcpu);
-
-	}
-	if (waitqueue_active(per_cpu_ptr(client->wq, vcpu))) {
+	if (waitqueue_active(per_cpu_ptr(client->wq, cpu))) {
 		//trace_printk("notify client[%s] [%d]\n", client->name, client->id);
-		wake_up_interruptible(per_cpu_ptr(client->wq, vcpu));
+		wake_up_interruptible(per_cpu_ptr(client->wq, cpu));
 	}
 }
 
@@ -995,18 +991,27 @@ int acrn_ioreq_distribute_request(struct vhm_vm *vm)
 
 	vcpu = raw_smp_processor_id();
 	vcpu_num = atomic_read(&vm->vcpu_num);
+	/*
 	if (vcpu >= vcpu_num) {
 		pr_err("Ignore IO request on non-exist vcpu[%d]!\n", vcpu);
 		return -EINVAL;
 	}
 	smp_mb();
 
+	*/
+	/*!!!! fixme !!!!!*/
+	if (vcpu==0) {
+		printk(KERN_ERR "should not have any io in cpu 0\n");
+	} else {
+		vcpu = vcpu -1;
+	}
+
 	req = vm->req_buf->req_queue + vcpu;
 
 	/* This function is called in tasklet only on SOS CPU0. Thus it
 	 * is safe to read the state first and update it later as long
 	 * as the update is atomic. */
-	if (vcpu == 3)
+	if (vcpu == -1)
 	trace_printk("vcpu[%d] req status[%d] type[%d] [%llx][%llx][%llx][%llx]\n", vcpu, atomic_read(&req->processed),
 			req->type,
 			req->reqs.reserved1[0],	req->reqs.reserved1[1],
@@ -1060,6 +1065,7 @@ int acrn_ioreq_complete_request(int client_id, uint64_t vcpu,
 	struct ioreq_client *client;
 	int ret;
 
+	/* !!!! fixme */
 	if (client_id < 0 || client_id >= MAX_CLIENT) {
 		pr_err("vhm-ioreq: no client for id %d\n", client_id);
 		return -EINVAL;

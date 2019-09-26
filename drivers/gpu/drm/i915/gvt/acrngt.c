@@ -245,6 +245,9 @@ static int acrngt_emulation_thread(void *priv)
 	gvt_dbg_core("start kthread for VM%d\n", info->vm_id);
 	ASSERT(info->nr_vcpu <= MAX_HVM_VCPUS_SUPPORTED);
 
+	/*!!!!! fixme !!!*/
+	vcpu = vcpu -1;
+
 	set_freezable();
 	while (1) {
 		ret = acrn_ioreq_attach_client(info->client, 1);
