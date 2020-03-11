@@ -97,7 +97,6 @@
 static int    major;
 static struct class *vhm_class;
 static struct device *vhm_device;
-static struct tasklet_struct vhm_io_req_tasklet;
 
 struct table_iomems {
 	/* list node for this table_iomems */
@@ -401,16 +400,7 @@ create_vm_fail:
 		/*
 		 * TODO: Query VM status with additional hypercall.
 		 * VM should be in paused status.
-		 *
-		 * In SMP SOS, we need flush the current pending ioreq dispatch
-		 * tasklet and finish it before clearing all ioreq of this VM.
-		 * With tasklet_kill, there still be a very rare race which
-		 * might lost one ioreq tasklet for other VMs. So arm one after
-		 * the clearing. It's harmless.
 		 */
-		tasklet_schedule(&vhm_io_req_tasklet);
-		tasklet_kill(&vhm_io_req_tasklet);
-		tasklet_schedule(&vhm_io_req_tasklet);
 		acrn_ioreq_clear_request(vm);
 		break;
 	}
@@ -745,7 +735,7 @@ create_vm_fail:
 	return ret;
 }
 
-static void io_req_tasklet(unsigned long data)
+static void vhm_intr_handler(void)
 {
 	struct vhm_vm *vm;
 
@@ -757,11 +747,6 @@ static void io_req_tasklet(unsigned long data)
 		acrn_ioreq_distribute_request(vm);
 	}
 	read_unlock(&vhm_vm_list_lock);
-}
-
-static void vhm_intr_handler(void)
-{
-	tasklet_schedule(&vhm_io_req_tasklet);
 }
 
 int vhm_vm_destroy(struct vhm_vm *vm)
@@ -898,7 +883,6 @@ static int __init vhm_init(void)
 		return PTR_ERR(vhm_device);
 	}
 	pr_info("register IPI handler\n");
-	tasklet_init(&vhm_io_req_tasklet, io_req_tasklet, 0);
 
 	if (hcall_set_callback_vector(HYPERVISOR_CALLBACK_VECTOR)) {
 		if (x86_platform_ipi_callback) {
@@ -926,7 +910,6 @@ static int __init vhm_init(void)
 }
 static void __exit vhm_exit(void)
 {
-	tasklet_kill(&vhm_io_req_tasklet);
 	acrn_remove_intr_irq();
 	device_destroy(vhm_class, MKDEV(major, 0));
 	class_unregister(vhm_class);
