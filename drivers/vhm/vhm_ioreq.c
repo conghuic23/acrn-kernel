@@ -959,24 +959,39 @@ static struct ioreq_client *acrn_ioreq_find_client_by_request(struct vhm_vm *vm,
 	return NULL;
 }
 
+bool get_current_vcpu(struct vhm_vm *vm, int *vcpu_id)
+{
+	int pcpu;
+	bool ret = false;
+
+	pcpu = raw_smp_processor_id();
+	*vcpu_id = vm->pcpu_vcpu_map[pcpu];
+	if (*vcpu_id >= 0 && *vcpu_id <= vm->vcpu_num)
+		ret = true;
+
+	return ret;
+}
+
 int acrn_ioreq_distribute_request(struct vhm_vm *vm)
 {
 	struct vhm_request *req;
 	struct list_head *pos;
 	struct ioreq_client *client;
-	int i, vcpu_num;
+	int vcpu_id;
 
-	vcpu_num = atomic_read(&vm->vcpu_num);
-	for (i = 0; i < vcpu_num; i++) {
-		req = vm->req_buf->req_queue + i;
+	/* get vcpu_id in current pcpu from the VM,
+	 * if no vcpu run on current pcpu, do noting */
+	if (!get_current_vcpu(vm, &vcpu_id))
+		return 0;
 
-		/* This function is called in tasklet only on SOS CPU0. Thus it
-		 * is safe to read the state first and update it later as long
-		 * as the update is atomic. */
-		if (atomic_read(&req->processed) == REQ_STATE_PENDING) {
-			if (handle_cf8cfc(vm, req, i))
-				continue;
-			handle_pcie_cfg(vm, req, i);
+	req = vm->req_buf->req_queue + vcpu_id;
+
+	/* This function is called in tasklet only on SOS CPU0. Thus it
+	 * is safe to read the state first and update it later as long
+	 * as the update is atomic. */
+	if (atomic_read(&req->processed) == REQ_STATE_PENDING) {
+		if (!handle_cf8cfc(vm, req, vcpu_id)) {
+			handle_pcie_cfg(vm, req, vcpu_id);
 			client = acrn_ioreq_find_client_by_request(vm, req);
 			if (client == NULL) {
 				pr_err("vhm-ioreq: failed to "
@@ -985,7 +1000,7 @@ int acrn_ioreq_distribute_request(struct vhm_vm *vm)
 			} else {
 				req->client = client->id;
 				atomic_set(&req->processed, REQ_STATE_PROCESSING);
-				set_bit(i, client->ioreqs_map);
+				set_bit(vcpu_id, client->ioreqs_map);
 				acrn_ioreq_put_client(client);
 			}
 		}
