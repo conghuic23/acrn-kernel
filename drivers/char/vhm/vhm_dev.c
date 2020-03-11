@@ -159,6 +159,7 @@ static long vhm_dev_ioctl(struct file *filep,
 	long ret = 0;
 	struct vhm_vm *vm;
 	struct ic_ptdev_irq ic_pt_irq;
+	int i;
 
 	pr_debug("[%s] ioctl_num=0x%x\n", __func__, ioctl_num);
 
@@ -231,6 +232,10 @@ static long vhm_dev_ioctl(struct file *filep,
 			goto create_vm_fail;
 		}
 		vm->vmid = created_vm->vmid;
+		vm->vcpu_num = created_vm->vcpu_num;
+		for (i = 0; i < 16; i++ ) {
+			vm->pcpu_vcpu_map[i] = created_vm->pcpu_vcpu_map[i];
+		}
 
 		if (created_vm->req_buf) {
 			ret = acrn_ioreq_init(vm, created_vm->req_buf);
@@ -302,7 +307,6 @@ create_vm_fail:
 			acrn_mempool_free(cv);
 			return -EFAULT;
 		}
-		atomic_inc(&vm->vcpu_num);
 		acrn_mempool_free(cv);
 
 		return ret;
