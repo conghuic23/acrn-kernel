@@ -134,7 +134,7 @@ struct ioreq_client {
 	ioreq_handler_t handler;
 	bool vhm_create_kthread;
 	struct task_struct *thread;
-	wait_queue_head_t wq;
+	wait_queue_head_t __percpu *wq;
 
 	/* pci bdf trap */
 	bool trap_bdf;
@@ -147,7 +147,7 @@ struct ioreq_client {
 };
 
 #define MAX_CLIENT 1024
-static void acrn_ioreq_notify_client(struct ioreq_client *client);
+static void acrn_ioreq_notify_client(struct ioreq_client *client, int cpu);
 
 static inline bool is_range_type(uint32_t type)
 {
@@ -218,6 +218,7 @@ int acrn_ioreq_create_client(unsigned long vmid, ioreq_handler_t handler,
 	struct vhm_vm *vm;
 	struct ioreq_client *client;
 	int client_id;
+	int cpu;
 
 	might_sleep();
 
@@ -260,7 +261,11 @@ int acrn_ioreq_create_client(unsigned long vmid, ioreq_handler_t handler,
 		strncpy(client->name, name, sizeof(client->name) - 1);
 	spin_lock_init(&client->range_lock);
 	INIT_LIST_HEAD(&client->range_list);
-	init_waitqueue_head(&client->wq);
+	client->wq = alloc_percpu(wait_queue_head_t);
+
+	for_each_possible_cpu(cpu) {
+		init_waitqueue_head(per_cpu_ptr(client->wq, cpu));
+	}
 
 	/* When it is added to ioreq_client_list, the refcnt is increased */
 	spin_lock_bh(&vm->ioreq_client_lock);
@@ -370,7 +375,6 @@ static void acrn_ioreq_remove_client_pervm(struct ioreq_client *client,
 	struct list_head *pos, *tmp;
 
 	set_bit(IOREQ_CLIENT_DESTROYING, &client->flags);
-	acrn_ioreq_notify_client(client);
 
 	while (client->vhm_create_kthread && !test_bit(IOREQ_CLIENT_EXIT, &client->flags)
 			&& test_bit(IOREQ_THREAD_START, &client->flags))
@@ -391,6 +395,8 @@ static void acrn_ioreq_remove_client_pervm(struct ioreq_client *client,
 
 	if (client->id == vm->ioreq_fallback_client)
 		vm->ioreq_fallback_client = -1;
+
+	free_percpu(client->wq);
 
 	/* When one client is removed from VM, the refcnt is decreased
 	 * it is pair with acrn_ioreq_get_client in acrn_ioreq_create_client
@@ -619,7 +625,7 @@ static int ioreq_client_thread(void *data)
 				break;
 			}
 		} else
-			wait_event_freezable(client->wq,
+			wait_event_freezable(*per_cpu_ptr(client->wq, smp_processor_id()),
 				(has_pending_request(client) ||
 				is_destroying(client)));
 	}
@@ -667,14 +673,14 @@ int acrn_ioreq_attach_client(int client_id, bool check_kthread_stop)
 		might_sleep();
 
 		if (check_kthread_stop) {
-			wait_event_freezable(client->wq,
+			wait_event_freezable(*per_cpu_ptr(client->wq, smp_processor_id()),
 				(kthread_should_stop() ||
 				has_pending_request(client) ||
 				is_destroying(client)));
 			if (kthread_should_stop())
 				set_bit(IOREQ_CLIENT_EXIT, &client->flags);
 		} else {
-			wait_event_freezable(client->wq,
+			wait_event_freezable(*per_cpu_ptr(client->wq, smp_processor_id()),
 				(has_pending_request(client) ||
 				is_destroying(client)));
 		}
@@ -732,11 +738,11 @@ void acrn_ioreq_unintercept_bdf(int client_id)
 	acrn_ioreq_put_client(client);
 }
 
-static void acrn_ioreq_notify_client(struct ioreq_client *client)
+static void acrn_ioreq_notify_client(struct ioreq_client *client, int cpu)
 {
 	/* if client thread is in waitqueue, wake up it */
-	if (waitqueue_active(&client->wq))
-		wake_up_interruptible(&client->wq);
+	if (waitqueue_active(per_cpu_ptr(client->wq, cpu)))
+		wake_up_interruptible(per_cpu_ptr(client->wq, cpu));
 }
 
 static int ioreq_complete_request(unsigned long vmid, int vcpu,
@@ -1010,7 +1016,7 @@ int acrn_ioreq_distribute_request(struct vhm_vm *vm)
 	list_for_each(pos, &vm->ioreq_client_list) {
 		client = container_of(pos, struct ioreq_client, list);
 		if (has_pending_request(client))
-			acrn_ioreq_notify_client(client);
+			acrn_ioreq_notify_client(client, smp_processor_id());
 	}
 	spin_unlock(&vm->ioreq_client_lock);
 
@@ -1070,7 +1076,7 @@ unsigned int vhm_dev_poll(struct file *filep, poll_table *wait)
 		return -EINVAL;
 	}
 
-	poll_wait(filep, &fallback_client->wq, wait);
+	poll_wait(filep, per_cpu_ptr(fallback_client->wq, smp_processor_id()), wait);
 	if (has_pending_request(fallback_client) ||
 		is_destroying(fallback_client))
 		ret = POLLIN | POLLRDNORM;
