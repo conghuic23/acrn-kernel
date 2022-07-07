@@ -133,6 +133,7 @@ static int acrn_ioeventfd_assign(struct acrn_vm *vm,
 
 	list_add_tail(&p->list, &vm->ioeventfds);
 	mutex_unlock(&vm->ioeventfds_lock);
+	hcall_assign_ioeventfd(vm->vmid, p->addr);
 
 	return 0;
 

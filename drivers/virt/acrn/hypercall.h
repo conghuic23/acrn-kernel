@@ -32,6 +32,7 @@
 #define HC_ID_IOREQ_BASE		0x30UL
 #define HC_SET_IOREQ_BUFFER		_HC_ID(HC_ID, HC_ID_IOREQ_BASE + 0x00)
 #define HC_NOTIFY_REQUEST_FINISH	_HC_ID(HC_ID, HC_ID_IOREQ_BASE + 0x01)
+#define HC_ASSIGN_IOEVENTFD		_HC_ID(HC_ID, HC_ID_IOREQ_BASE + 0x02)
 
 #define HC_ID_MEM_BASE			0x40UL
 #define HC_VM_SET_MEMORY_REGIONS	_HC_ID(HC_ID, HC_ID_MEM_BASE + 0x02)
@@ -178,6 +179,10 @@ static inline long hcall_set_ioreq_buffer(u64 vmid, u64 buffer)
 	return acrn_hypercall2(HC_SET_IOREQ_BUFFER, vmid, buffer);
 }
 
+static inline long hcall_assign_ioeventfd(u64 vmid, u64 addr)
+{
+	return acrn_hypercall2(HC_ASSIGN_IOEVENTFD, vmid, addr);
+}
 /**
  * hcall_notify_req_finish() - Notify ACRN Hypervisor of I/O request completion.
  * @vmid:	User VM ID
@@ -190,6 +195,10 @@ static inline long hcall_notify_req_finish(u64 vmid, u64 vcpu)
 	return acrn_hypercall2(HC_NOTIFY_REQUEST_FINISH, vmid, vcpu);
 }
 
+static inline long hcall_assign_ioeventfd(u64 vmid, u64 addr)
+{
+	return acrn_hypercall2(HC_ASSIGN_IOEVENTFD, vmid, addr);
+}
 /**
  * hcall_set_memory_regions() - Inform the hypervisor to set up EPT mappings
  * @regions_pa:	Service VM GPA of &struct vm_memory_region_batch
