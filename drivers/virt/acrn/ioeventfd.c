@@ -10,6 +10,7 @@
  */
 
 #include <linux/eventfd.h>
+#include <linux/io.h>
 #include <linux/slab.h>
 
 #include "acrn_drv.h"
@@ -68,6 +69,43 @@ static bool hsm_ioeventfd_is_conflict(struct acrn_vm *vm,
 	return false;
 }
 
+static int asyncio_config(struct acrn_vm *vm, bool is_assign,
+				 struct acrn_ioeventfd *args)
+{
+	struct eventfd_ctx *eventfd;
+	struct acrn_asyncio_reqinfo *asyncio_info;
+	int ret;
+
+	if (!vm->asyncio_sbuf)
+		return -ENODEV;
+
+	asyncio_info = kzalloc(sizeof(*asyncio_info), GFP_KERNEL);
+	if (!asyncio_info)
+		return -ENOMEM;
+
+	eventfd = eventfd_ctx_fdget(args->fd);
+	if (IS_ERR(eventfd)) {
+		kfree(asyncio_info);
+		return PTR_ERR(eventfd);
+	}
+
+	asyncio_info->addr = args->addr;
+	asyncio_info->fd = (u64)eventfd;
+	if (args->flags & ACRN_IOEVENTFD_FLAG_PIO)
+		asyncio_info->type = ACRN_ASYNC_TYPE_PIO;
+	else
+		asyncio_info->type = ACRN_ASYNC_TYPE_MMIO;
+	if (is_assign)
+		ret = hcall_asyncio_assign(vm->vmid, virt_to_phys(asyncio_info));
+	else
+		ret = hcall_asyncio_deassign(vm->vmid, virt_to_phys(asyncio_info));
+	if (ret < 0) {
+		dev_err(acrn_dev.this_device, "Failed to setup asyncio: base = 0x%llx!\n", args->addr);
+	}
+	kfree(asyncio_info);
+	return ret;
+}
+
 /*
  * Assign an eventfd to a VM and create a HSM ioeventfd associated with the
  * eventfd. The properties of the HSM ioeventfd are built from a &struct
@@ -80,6 +118,9 @@ static int acrn_ioeventfd_assign(struct acrn_vm *vm,
 	struct hsm_ioeventfd *p;
 	int ret;
 
+	if (args->flags & ACRN_IOEVENTFD_FLAG_ASYNCIO) {
+		return asyncio_config(vm, true, args);
+	}
 	/* Check for range overflow */
 	if (args->addr + args->len < args->addr)
 		return -EINVAL;
@@ -150,6 +191,9 @@ static int acrn_ioeventfd_deassign(struct acrn_vm *vm,
 	struct hsm_ioeventfd *p;
 	struct eventfd_ctx *eventfd;
 
+	if (args->flags & ACRN_IOEVENTFD_FLAG_ASYNCIO) {
+		return asyncio_config(vm, false, args);
+	}
 	eventfd = eventfd_ctx_fdget(args->fd);
 	if (IS_ERR(eventfd))
 		return PTR_ERR(eventfd);
