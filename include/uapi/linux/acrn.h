@@ -479,6 +479,20 @@ struct acrn_vdev {
 	__u8	args[128];
 };
 
+#define ACRN_ASYNC_TYPE_PIO		0x01U
+#define ACRN_ASYNC_TYPE_MMIO		0x02U
+
+/*struct acrn_asyncio_reqinfo - Data for setting asyncio request of User VM
+ * @type:	IO type, ACRN_ASYNC_PIO/ACRN_ASYNC_MMIO
+ * @addr:	IO base address
+ * @fd:		eventfd of this asynicio.
+ */
+struct acrn_asyncio_reqinfo {
+	__u32	type;
+	__u64	addr;
+	__u64	fd;
+};
+
 #define SBUF_MAGIC	0x5aa57aa71aa13aa3
 #define SBUF_MAX_SIZE	(1ULL << 22)
 #define SBUF_HEAD_SIZE	64
@@ -581,6 +595,7 @@ enum acrn_pm_cmd_type {
 #define ACRN_IOEVENTFD_FLAG_PIO		0x01
 #define ACRN_IOEVENTFD_FLAG_DATAMATCH	0x02
 #define ACRN_IOEVENTFD_FLAG_DEASSIGN	0x04
+#define ACRN_IOEVENTFD_FLAG_ASYNCIO	0x08
 /**
  * struct acrn_ioeventfd - Data to operate a &struct hsm_ioeventfd
  * @fd:		The fd of eventfd associated with a hsm_ioeventfd
