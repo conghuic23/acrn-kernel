@@ -14,6 +14,7 @@
 #include <linux/kthread.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
+#include <linux/eventfd.h>
 
 #include <asm/acrn.h>
 
@@ -204,6 +205,21 @@ static int ioreq_task(void *data)
 	return 0;
 }
 
+static int acrn_asyncio_dispatch(struct acrn_vm *vm)
+{
+	shared_buf_t *sbuf = vm->asyncio_sbuf;
+	uint64_t *fd_ptr;
+
+	fd_ptr = acrn_sbuf_get_data_ptr(sbuf);
+	while (fd_ptr) {
+		eventfd_signal((struct eventfd_ctx *)(*fd_ptr) , 1);
+		acrn_sbuf_move_next(sbuf);
+		fd_ptr = acrn_sbuf_get_data_ptr(sbuf);
+	}
+	mb();
+
+	return 0;
+}
 /*
  * For the non-default I/O clients, give them chance to complete the current
  * I/O requests if there are any. For the default I/O client, it is safe to
@@ -553,6 +569,8 @@ static void ioreq_dispatcher(struct work_struct *work)
 
 	read_lock(&acrn_vm_list_lock);
 	list_for_each_entry(vm, &acrn_vm_list, list) {
+		if (vm->asyncio_sbuf)
+			acrn_asyncio_dispatch(vm);
 		if (!vm->ioreq_buf)
 			break;
 		acrn_ioreq_dispatch(vm);
