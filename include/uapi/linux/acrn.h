@@ -479,6 +479,43 @@ struct acrn_vdev {
 	__u8	args[128];
 };
 
+#define SBUF_MAGIC	0x5aa57aa71aa13aa3
+#define SBUF_MAX_SIZE	(1ULL << 22)
+#define SBUF_HEAD_SIZE	64
+
+/* sbuf flags */
+#define OVERRUN_CNT_EN	(1ULL << 0) /* whether overrun counting is enabled */
+#define OVERWRITE_EN	(1ULL << 1) /* whether overwrite is enabled */
+
+/**
+ * (sbuf) head + buf (store (ele_num - 1) elements at most)
+ * buffer empty: tail == head
+ * buffer full:  (tail + ele_size) % size == head
+ *
+ *             Base of memory for elements
+ *                |
+ *                |
+ * ---------------------------------------------------------------------------------------
+ * | shared_buf_t | raw data (ele_size)| raw date (ele_size) | ... | raw data (ele_size) |
+ * ---------------------------------------------------------------------------------------
+ * |
+ * |
+ * shared_buf_t *buf
+ */
+
+/* Make sure sizeof(shared_buf_t) == SBUF_HEAD_SIZE */
+typedef struct shared_buf {
+	uint64_t magic;
+	uint32_t ele_num;	/* number of elements */
+	uint32_t ele_size;	/* sizeof of elements */
+	uint32_t head;		/* offset from base, to read */
+	uint32_t tail;		/* offset from base, to write */
+	uint64_t flags;
+	uint32_t overrun_cnt;	/* count of overrun */
+	uint32_t size;		/* ele_num * ele_size */
+	uint32_t padding[6];
+} ____cacheline_aligned shared_buf_t;
+
 /**
  * struct acrn_msi_entry - Info for injecting a MSI interrupt to a VM
  * @msi_addr:	MSI addr[19:12] with dest vCPU ID
