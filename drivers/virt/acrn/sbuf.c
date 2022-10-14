@@ -48,3 +48,23 @@ void acrn_sbuf_move_next(shared_buf_t *sbuf)
 {
 	sbuf->head = sbuf_next_ptr(sbuf->head, sbuf->ele_size, sbuf->size);
 }
+
+int acrn_sbuf_setup(uint16_t vm_id, uint16_t vcpu_id, uint32_t sbuf_id, uint64_t gpa)
+{
+	struct acrn_sbuf_param *asp;
+	int ret;
+
+	if (x86_hyper_type != X86_HYPER_ACRN)
+		return -ENODEV;
+
+	asp = kzalloc(sizeof(*asp), GFP_KERNEL);
+	if (!asp)
+		return -ENOMEM;
+	asp->vcpu_id = vcpu_id;
+	asp->sbuf_id = sbuf_id;
+	asp->gpa = gpa;
+
+	ret = hcall_set_sbuf(vm_id, virt_to_phys(asp));
+	kfree(asp);
+	return ret;
+}

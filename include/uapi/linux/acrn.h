@@ -617,6 +617,21 @@ struct acrn_irqfd {
 	struct acrn_msi_entry	msi;
 };
 
+/**
+ * struct acrn_sbuf_param - Data to register a share buffer by hypercall
+ * @vcpu_id:	Id of the vcpu which own this sbuf.
+ * 		ACRN_INVALID_CPUID means the sbuf is belong to a VM.
+ * @reserved:	Reserved field.
+ * @sbuf_id:	Type of the sbuf.
+ * @gpa:	physcial address of the sbuf.
+ */
+struct acrn_sbuf_param {
+	__u16	vcpu_id;
+	__u16	reserved;
+	__u32	sbuf_id;
+	__u64	gpa;
+};
+
 /* The ioctl type, documented in ioctl-number.rst */
 #define ACRN_IOCTL_TYPE			0xA2
 

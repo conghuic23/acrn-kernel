@@ -15,6 +15,7 @@
 #include <asm/acrn.h>
 #include "acrn_drv.h"
 
+int acrn_sbuf_setup(uint16_t vm_id, uint16_t vcpu_id, uint32_t sbuf_id, uint64_t gpa);
 void *acrn_sbuf_get_data_ptr(shared_buf_t *sbuf);
 void acrn_sbuf_move_next(struct shared_buf *sbuf);
 #endif /* SHARED_BUF_H */
