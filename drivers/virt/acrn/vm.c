@@ -80,6 +80,7 @@ int acrn_vm_destroy(struct acrn_vm *vm)
 	acrn_ioeventfd_deinit(vm);
 	acrn_irqfd_deinit(vm);
 	acrn_ioreq_deinit(vm);
+	acrn_asyncio_deinit(vm);
 
 	if (vm->monitor_page) {
 		put_page(vm->monitor_page);

@@ -19,6 +19,7 @@
 #include <asm/hypervisor.h>
 
 #include "acrn_drv.h"
+#include "sbuf.h"
 
 /*
  * When /dev/acrn_hsm is opened, a 'struct acrn_vm' object is created to
@@ -176,6 +177,9 @@ static long acrn_dev_ioctl(struct file *filp, unsigned int cmd,
 		break;
 	case ACRN_IOCTL_DESTROY_VM:
 		ret = acrn_vm_destroy(vm);
+		break;
+	case ACRN_IOCTL_SETUP_ASYNCIO:
+		ret = acrn_asyncio_init(vm, ioctl_param);
 		break;
 	case ACRN_IOCTL_SET_VCPU_REGS:
 		cpu_regs = memdup_user((void __user *)ioctl_param,

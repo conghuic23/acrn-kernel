@@ -617,6 +617,10 @@ struct acrn_irqfd {
 	struct acrn_msi_entry	msi;
 };
 
+enum sbuf_type {
+	ACRN_ASYNCIO = 64,
+};
+
 /**
  * struct acrn_sbuf_param - Data to register a share buffer by hypercall
  * @vcpu_id:	Id of the vcpu which own this sbuf.
@@ -673,6 +677,8 @@ struct acrn_sbuf_param {
 	_IOW(ACRN_IOCTL_TYPE, 0x41, struct acrn_vm_memmap)
 #define ACRN_IOCTL_UNSET_MEMSEG		\
 	_IOW(ACRN_IOCTL_TYPE, 0x42, struct acrn_vm_memmap)
+#define ACRN_IOCTL_SETUP_ASYNCIO	\
+	_IOW(ACRN_IOCTL_TYPE, 0x43, __u64)
 
 #define ACRN_IOCTL_SET_PTDEV_INTR	\
 	_IOW(ACRN_IOCTL_TYPE, 0x53, struct acrn_ptdev_irq)
