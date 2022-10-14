@@ -18,6 +18,7 @@
 #include <asm/acrn.h>
 
 #include "acrn_drv.h"
+#include "sbuf.h"
 
 static void ioreq_pause(void);
 static void ioreq_resume(void);
@@ -636,6 +637,69 @@ int acrn_ioreq_init(struct acrn_vm *vm, u64 buf_vma)
 free_buf:
 	kfree(set_buffer);
 	return ret;
+}
+
+int acrn_asyncio_setup(struct acrn_vm *vm, u64 buf_vma)
+{
+	int ret;
+	shared_buf_t *sbuf;
+	struct page *page;
+
+	mutex_lock(&vm->asyncio_lock);
+
+	if (vm->asyncio_sbuf || vm->asyncio_page) {
+		ret = -EEXIST;
+		goto err;
+	}
+	/* asyncio is created per vm, so vm should not be null */
+	ret = pin_user_pages_fast(buf_vma, 1,
+				  FOLL_WRITE | FOLL_LONGTERM, &page);
+
+	if (unlikely(ret != 1) || !page) {
+		dev_err(acrn_dev.this_device, "Failed to pin asyncio page!\n");
+		ret = -EFAULT;
+		goto err;
+	}
+
+	sbuf = page_address(page);
+	if (sbuf->magic != SBUF_MAGIC ||
+			((sbuf->size + SBUF_HEAD_SIZE) > SBUF_MAX_SIZE)) {
+		dev_err(acrn_dev.this_device, "MAGIC is not correct or size is too large!\n");
+		ret = -EINVAL;
+		goto err_unpin;
+	}
+
+	vm->asyncio_sbuf = sbuf;
+	vm->asyncio_page = page;
+	dev_dbg(acrn_dev.this_device,
+		"Init asyncio buffer %p\n", vm->asyncio_sbuf);
+
+	ret = acrn_sbuf_setup(vm->vmid, ACRN_INVALID_CPUID, ACRN_ASYNCIO, page_to_phys(page));
+	if (ret < 0) {
+		vm->asyncio_sbuf = NULL;
+		vm->asyncio_page = NULL;
+		goto err_unpin;
+	}
+	mutex_unlock(&vm->asyncio_lock);
+	return 0;
+
+err_unpin:
+	unpin_user_page(page);
+err:
+	mutex_unlock(&vm->asyncio_lock);
+	return ret;
+}
+
+void acrn_asyncio_free(struct acrn_vm *vm)
+{
+	mutex_lock(&vm->asyncio_lock);
+	dev_dbg(acrn_dev.this_device,
+		"Deinit asyncio buffer 0x%p\n", vm->asyncio_sbuf);
+	if (vm->asyncio_sbuf && vm->asyncio_page) {
+		unpin_user_page(vm->asyncio_page);
+		vm->asyncio_sbuf = NULL;
+	}
+	mutex_unlock(&vm->asyncio_lock);
 }
 
 void acrn_ioreq_deinit(struct acrn_vm *vm)
