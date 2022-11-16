@@ -14,7 +14,7 @@
 #include <linux/types.h>
 #include <linux/uuid.h>
 
-#define ACRN_IO_REQUEST_MAX		16
+#define ACRN_IO_REQUEST_MAX		32
 
 #define ACRN_IOREQ_STATE_PENDING	0
 #define ACRN_IOREQ_STATE_COMPLETE	1
@@ -149,7 +149,6 @@ struct acrn_pci_request {
 struct acrn_io_request {
 	__u32	type;
 	__u32	completion_polling;
-	__u32	reserved0[14];
 	union {
 		struct acrn_pio_request		pio_request;
 		struct acrn_pci_request		pci_request;
@@ -159,7 +158,7 @@ struct acrn_io_request {
 	__u32	reserved1;
 	__u32	kernel_handled;
 	__u32	processed;
-} __attribute__((aligned(256)));
+} __attribute__((aligned(128)));
 
 struct acrn_io_request_buffer {
 	union {
